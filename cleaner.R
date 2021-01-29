@@ -158,3 +158,11 @@ unique(df$neighbourhood_group_cleansed)
 write_csv(df,'cleaned_first_without_dummies.csv')
 
 # from here amenities needs to be broken out
+
+install.packages("splitstackshape")
+library(splitstackshape)
+
+rm(all_amenities)
+
+all_amenities <- concat.split.expanded(df, "amenities", sep=",", type="character", drop=TRUE, fill = 0)
+write_csv(all_amenities,'cleaned_with_dummies_v01.csv')
