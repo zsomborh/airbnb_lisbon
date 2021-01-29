@@ -2,8 +2,9 @@ rm(list = ls())
 
 library(tidyverse)
 library(data.table)
+library(splitstackshape)
 
-
+w_dir = 'C:/Users/T450s/Desktop/programming/git/airbnb_lisbon'
 df <- read_csv('listings.csv')
 
 # First sense checks ------------------------------------------------------
@@ -17,7 +18,6 @@ nrow(df[duplicated(df),]) # There are no duplicates either
 
 # 1) Between 2 and 6 accomodates
 df <- df[df$accommodates >= 2 & df$accommodates <= 6,]
-
 
 # 2) Apartmants - I will reduce this category sizeably
 
@@ -97,12 +97,11 @@ keep_cols = subset(colnames(df), !(colnames(df) %in% drop_cols))
 
 df = df[,keep_cols]
 
-
 # Clean the useful variables, drop or impute NAs --------------------------
-
 
 df <- df %>%  mutate(
     bathrooms = as.numeric(gsub('[^[:digit:].]','',bathrooms_text)),
+    bathrooms = ifelse(is.na(bathrooms), accommodates /4,bathrooms),
     price = as.numeric(gsub('[^[:digit:].]','',price)),
     bathrooms_text = NULL)
 
@@ -118,8 +117,6 @@ ggplot(data = df, aes(x = price)) +
 df <- df %>% filter(price < 1000)
 
 #transform host since to how many years host is active
-colnames(df)
-unique(df$host_since)
 
 df <- df %>% filter(!is.na(host_since)) # there is one variable with NA here, that we removed
 
@@ -137,14 +134,15 @@ unique(df$beds)
 
 sum(is.na(df$beds))
 # we will inpute missing values with assumption that every two guest has 1 bedroom, 1 guest has 1 bed
-df<- df %>% mutate(bedrooms = ifelse(is.na(bedrooms),accommodates/2,bedrooms ),
-                   beds = ifelse(is.na(beds),accommodates,beds ))
+df<- df %>% mutate(bedrooms = as.numeric(ifelse(is.na(bedrooms),accommodates/2,bedrooms )),
+                   beds = as.numeric(ifelse(is.na(beds),accommodates,beds )))
 
 # min nights if more than 3, it stays at 3
 df %>% group_by(minimum_nights) %>% summarise(n())
 
 df <- df %>%
-    mutate(minimum_nights= cut(minimum_nights, c(1,2,3,max(minimum_nights)), labels=c(1,2,3), right = F))
+    mutate(minimum_nights= cut(minimum_nights, c(1,2,3,max(minimum_nights)), labels=c(1,2,3), right = F),
+           minimum_nights= as.numeric(ifelse(is.na(minimum_nights),df$minimum_nights,na.rm=TRUE,minimum_nights))) #impute only 3 observations
 
 # review scores - impute with median, leave flag
 
@@ -153,11 +151,14 @@ df<- df %>% mutate(
     review_scores_rating =  ifelse(is.na(review_scores_rating), median(review_scores_rating, na.rm = T), review_scores_rating))
 
 
-#write_csv(df,'cleaned_first_without_dummies.csv')
+#reviews_per_month
+
+sum(df[is.na(df$reviews_per_month),'number_of_reviews']) # reviews_per_month is NA when it should be zero
+
+df <- df %>% mutate(reviews_per_month = as.numeric(ifelse(is.na(reviews_per_month),0,reviews_per_month)))
 
 
 # Breaking out amenities --------------------------------------------------
-
 
 #first we create a list with the most imporant amenities called to_keep 
 amenities = unlist(strsplit(gsub('[^[:alpha:]|,| ]','',df$amenities),","))
@@ -184,5 +185,6 @@ dummies_df = dummies_df[,colnames(dummies_df) %in% to_keep]
 
 #We append dummies df to our analyise df 
 merged <- cbind(df,dummies_df)
-rm(dummies_df)
-rm(temp_df)
+merged$amenities <- NULL
+
+write_csv(merged,paste0(w_dir,'/data/clean/cleaned_airbnb2.csv'))
