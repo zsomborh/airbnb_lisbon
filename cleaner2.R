@@ -155,14 +155,34 @@ df<- df %>% mutate(
 
 #write_csv(df,'cleaned_first_without_dummies.csv')
 
-# from here amenities needs to be broken out
+
+# Breaking out amenities --------------------------------------------------
 
 
-gsub('[^[:alpha:]]','',unlist(strsplit(x  =my_string,split = ',')))
-
+#first we create a list with the most imporant amenities called to_keep 
 amenities = unlist(strsplit(gsub('[^[:alpha:]|,| ]','',df$amenities),","))
 amenities = gsub('^ *','',amenities)
-
 amenities_df = as.data.frame(amenities)
 colnames(amenities_df) <- 'amenities'
-amenities_df <- amenities_df %>% group_by(amenities) %>% summarise(n())
+amenities_df <- amenities_df %>% group_by(amenities) %>% summarise(count = n())
+amenities_df = amenities_df[amenities_df$count > 100,]
+to_keep = amenities_df$amenities
+to_keep = gsub(' ','_',to_keep)
+
+# do some smaller formatting with regex on amenities col
+df <- df %>% mutate(
+    amenities = gsub('[^[:alpha:]|,| ]','',amenities),
+    amenities = gsub('[(, )] ',',',amenities),
+    amenities = gsub(' ','_',amenities)
+)
+
+# We create separate dummies col in which we create dummies if one of the words from to_keep col are available 
+temp_df <- concat.split.expanded(data = df, split.col = "amenities", sep=",", type="character", drop=TRUE, fill = 0)
+dummies_df <- temp_df[,grepl('amenities_',colnames(temp_df))]
+colnames(dummies_df) = gsub('amenities_','',colnames(dummies_df))
+dummies_df = dummies_df[,colnames(dummies_df) %in% to_keep]
+
+#We append dummies df to our analyise df 
+merged <- cbind(df,dummies_df)
+rm(dummies_df)
+rm(temp_df)
