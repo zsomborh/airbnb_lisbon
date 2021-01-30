@@ -239,6 +239,7 @@ rf_model_var_imp_plot_b
 # Partial Dependence Plots -------------------------------------------------------
 #########################################################################################
 
+# if we increase the number of accommodates, the price also increases in a fairly linear way
 pdp_n_acc <- pdp::partial(rf_model, pred.var = "accommodates", pred.grid = distinct_(df_holdout, "accommodates"), train = df_train)
 pdp_n_acc_plot <- pdp_n_acc %>%
   autoplot( ) +
@@ -250,6 +251,7 @@ pdp_n_acc_plot <- pdp_n_acc %>%
   theme_bw()
 pdp_n_acc_plot
 
+# an apartment is predicted to have higher price than a room
 pdp_n_roomtype <- pdp::partial(rf_model, pred.var = "property_type", pred.grid = distinct_(df_holdout, "property_type"), train = df_train)
 pdp_n_roomtype_plot <- pdp_n_roomtype %>%
   autoplot( ) +
@@ -260,10 +262,10 @@ pdp_n_roomtype_plot <- pdp_n_roomtype %>%
   theme_bw()
 pdp_n_roomtype_plot
 
-# Subsample performance: RMSE / mean(y) ---------------------------------------
-# NOTE  we do this on the holdout set.
+# Subsample performance: 
+# how well the rf_model performs on different subsets - calculating RMSE and the mean price per each subgroup
 
-# ---- cheaper or more expensive flats - not used in book
+# holdout set
 df_holdout_w_prediction <- df_holdout %>%
   mutate(predicted_price = predict(rf_model, newdata = df_holdout))
 
@@ -297,4 +299,15 @@ c <- df_holdout_w_prediction %>%
     rmse_norm = RMSE(predicted_price, price) / mean(price)
   )
 
-# Save output
+# Save output - RESULT_3 shows error
+# colnames(a) <- c("", "RMSE", "Mean price", "RMSE/price")
+# colnames(b) <- c("", "RMSE", "Mean price", "RMSE/price")
+# colnames(c) <- c("", "RMSE", "Mean price", "RMSE/price")
+
+# line1 <- c("Size of accomodation", "", "", "")
+# line2 <- c("Property type", "", "", "")
+# line3 <- c("All",  "", "", "")
+
+# result_3 <- rbind(line1, a, line2, b, line3, c) %>%
+# transform(RMSE = as.numeric(RMSE), `Mean price` = as.numeric(`Mean price`), RMSE/price` = as.numeric(`RMSE/price`))
+
