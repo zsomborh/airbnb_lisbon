@@ -5,7 +5,7 @@ library(data.table)
 library(splitstackshape)
 
 w_dir = 'C:/Users/T450s/Desktop/programming/git/airbnb_lisbon'
-df <- read_csv('listings.csv')
+df <- read_csv('https://raw.githubusercontent.com/zsomborh/airbnb_lisbon/main/data/raw/listings.csv')
 
 # First sense checks ------------------------------------------------------
 
