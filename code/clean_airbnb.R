@@ -120,7 +120,7 @@ df <- df %>% filter(price < 1000)
 
 df <- df %>% filter(!is.na(host_since)) # there is one variable with NA here, that we removed
 
-df %>% mutate(
+df <- df %>% mutate(
     host_since = as.numeric(round((as.Date('2020-12-20')- as.Date(host_since))/365,0)))
 
 # neighbourhoods show that there are places that are not actually Lisbon but close neighbourhoods
@@ -187,4 +187,4 @@ dummies_df = dummies_df[,colnames(dummies_df) %in% to_keep]
 merged <- cbind(df,dummies_df)
 merged$amenities <- NULL
 
-write_csv(merged,paste0(w_dir,'/data/clean/cleaned_airbnb2.csv'))
+write_csv(merged,paste0(w_dir,'/data/clean/cleaned_airbnb.csv'))
