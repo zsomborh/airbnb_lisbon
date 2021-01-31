@@ -48,10 +48,6 @@ amenities <- colnames(df)[!colnames(df) %in% c('id',target_var, basic_vars, host
 
 # EDA
 
-df <- df %>% mutate(
-    ln_price = log(price)
-)
-
 df %>%
     group_by(property_type) %>%
     dplyr::summarize(mean_price = mean(price, na.rm=TRUE))
@@ -128,7 +124,7 @@ cont_vars <- c('minimum_nights', 'bedrooms','beds','bathrooms', 'host_since', 'h
 df <- get_lns(df,cont_vars,0.5)
 
 ln_vars <- colnames(df)[!colnames(df) %in% c(basic_vars,host_info,reviews,amenities,'id', 'price')]
-
+ln_vars
 
 # Create interaction variables - a few handpicked from EDA phase and all amenities + property type 
 interactions1 <- c('property_type * dishwasher',
@@ -166,7 +162,6 @@ for (i in c('ln_price',ln_vars)){
 
 sum(is.nan(df$ln_bathrooms))
 #create predictors sets
-tf <- df[,ln_vars] 
 
 predictors_1 <- c(basic_vars)
 predictors_2 <- c(basic_vars, host_info, reviews, amenities)
@@ -177,7 +172,7 @@ predictors_transformed_small <- c(predictors_2[!predictors_2 %in% transformed],i
 predictors_transformed_big <- c(predictors_2[!predictors_2 %in% transformed],interactions2,ln_vars)
 
 
-# Modeling ----------------------------------------------------------------
+# Modeling with Lasso + OLS ----------------------------------------------------------------
 
 #  create holdout set 
 set.seed(7)
@@ -192,7 +187,6 @@ train_control <- trainControl(method = "cv",
                               number = 5,
                               verboseIter = FALSE)
 
-View(head(df[,ln_vars],100))
 # Starting off with simple OLSs 
 
 set.seed(7)
@@ -225,6 +219,7 @@ system.time({
 })
 
 
+
 ols_model_coeffs1 <-  ols_model1$finalModel$coefficients
 ols_model_coeffs_df1 <- data.frame(
   "variable" = names(ols_model_coeffs1),
@@ -250,17 +245,16 @@ ols_model_coeffs_df3 <- data.frame(
 
 
 
-# Second is Lasso
+# Using Lasso
 
-# TODO: reparametise
 set.seed(7)
 system.time({
   lasso_model <- train(
-    formula(paste0("price ~", paste0(predictors_2, collapse = " + "))), #Change predictors to contain interactions... 
+    formula(paste0("price ~", paste0(predictors_2, collapse = " + "))),  
     data = df_train,
     method = "glmnet",
     preProcess = c("center", "scale"),
-    tuneGrid =  expand.grid("alpha" = 1, "lambda" = seq(0.01, 0.25, by = 0.01)),
+    tuneGrid =  expand.grid("alpha" = 1, "lambda" = seq(0.01, 1, by = 0.01)),
     trControl = train_control
   )
 })
@@ -268,11 +262,11 @@ system.time({
 set.seed(7)
 system.time({
     lasso_model2 <- train(
-        formula(paste0("price ~", paste0(predictors_transformed_big, collapse = " + "))), #Change predictors to contain interactions... 
+        formula(paste0("price ~", paste0(predictors_transformed_big, collapse = " + "))), 
         data = df_train,
         method = "glmnet",
         preProcess = c("center", "scale"),
-        tuneGrid =  expand.grid("alpha" = 1, "lambda" = seq(0.01, 0.25, by = 0.01)),
+        tuneGrid =  expand.grid("alpha" = 1, "lambda" = seq(0.01, 1, by = 0.01)),
         trControl = train_control
     )
 })
@@ -288,7 +282,6 @@ lasso_coeffs <- coef(
 
 lasso_coeffs_non_null <- lasso_coeffs[!lasso_coeffs$lasso_coefficient == 0,]
 
-
 lasso_coeffs2 <- coef(
     lasso_model2$finalModel,
     lasso_model2$bestTune$lambda) %>%
@@ -302,8 +295,6 @@ lasso_coeffs_non_null2 <- lasso_coeffs2[!lasso_coeffs2$lasso_coefficient == 0,]
 # TODO put everything in one 
 regression_coeffs <- merge(ols_model_coeffs_df1,ols_model_coeffs_df2,ols_model_coeffs_df3, lasso_coeffs_non_null,lasso_coeffs_non_null2, by = "variable", all=TRUE)
 
-
-
 # Check OLS, Lasso performance: 
 
 temp_models <-
@@ -313,22 +304,31 @@ temp_models <-
          "LASSO1 (model w/ few interactions)" = lasso_model,
          "LASSO2 (model w/ all interactions)" = lasso_model2)
 
-result_temp <- resamples(results_temp) %>% summary()
+result_temp <- resamples(temp_models) %>% summary()
 
-result_temp2 <- imap(temp_models, ~{
-    mean(results$values[[paste0(.y,"~RMSE")]])
+result_temp
+
+result_rmse <- imap(temp_models, ~{
+    mean(result_temp$values[[paste0(.y,"~RMSE")]])
 }) %>% unlist() %>% as.data.frame() %>%
     rename("CV RMSE" = ".")
 
+result_holdout <- map(temp_models, ~{
+    RMSE(predict(.x, newdata = df_holdout), df_holdout[["price"]])
+}) %>% unlist() %>% as.data.frame() %>%
+    rename("Holdout RMSE" = ".")
+
 result_temp
-result_temp2
+result_rmse
+result_holdout
 
 # based on cross validated RMSEs, it makes sense to increase model complexity to some extent, but 
 # It doesn't do a lot of improvement on OLS to include interactions/ln transformations
 
-# moving to tree based models
 
-# CART --------------------------------------------------------------------
+# MOdeling with tree based models  --------------------------------------------------------------------
+
+# TODO: pruning, tuning  
 
 set.seed(7)
 system.time({
@@ -336,7 +336,7 @@ system.time({
     formula(paste0("price ~", paste0(predictors_2, collapse = " + "))),
     data = df_train,
     method = "rpart",
-    tuneLength = 10,
+    tuneLength = 9,
     trControl = train_control
   )
 })
@@ -351,7 +351,7 @@ tune_grid <- expand.grid(
   .min.node.size = c(5, 10, 15)
 )
 
-set.seed(1234)
+set.seed(7)
 system.time({
   rf_model <- train(
     formula(paste0("price ~", paste0(predictors_2, collapse = " + "))),
@@ -394,7 +394,7 @@ final_models <-
        "GBM" = gbm_model)
 
 results <- resamples(final_models) %>% summary()
-
+results
 #Evaluate models
 
 #kable(x = result_4, format = "latex", digits = 3, booktabs=TRUE, linesep = "") %>%
@@ -481,7 +481,6 @@ df_holdout_w_prediction <- df_holdout %>%
   mutate(predicted_price = predict(rf_model, newdata = df_holdout))
 
 
-
 ######### create nice summary table of heterogeneity
 a <- df_holdout_w_prediction %>%
   mutate(is_low_size = ifelse(accommodates <= 3, "small apt", "large apt")) %>%
@@ -531,8 +530,6 @@ rf_model_var_imp_df <-
     data.frame(varname = names(rf_model_var_imp),imp = rf_model_var_imp) %>%
     arrange(desc(imp)) %>%
     mutate(imp_percentage = imp/sum(imp))
-
-rf_model_var_imp_df[rf_model_var_imp_df$varname %in% amenities,]
 
 
 rf_model_var_imp_df <- rf_model_var_imp_df %>% mutate(
