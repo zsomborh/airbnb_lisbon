@@ -21,12 +21,12 @@ price_diff_by_variables2 <- function(df, factor_var, dummy_var, factor_lab, dumm
         geom_errorbar(aes(ymin=Mean-(1.96*se),ymax=Mean+(1.96*se)),
                       position=position_dodge(width = 0.9), width = 0.25)+
         scale_color_manual(name=dummy_lab,
-                           values=c(color[2],color[1])) +
+                           values=c('navyblue','purple4')) +
         scale_fill_manual(name=dummy_lab,
-                          values=c(color[2],color[1])) +
+                          values=c('navyblue','purple4')) +
         ylab('Mean Price')+
         xlab(factor_lab) +
-        theme_bg()+
+        theme_minimal()+
         theme(panel.grid.major=element_blank(),
               panel.grid.minor=element_blank(),
               panel.border=element_blank(),
