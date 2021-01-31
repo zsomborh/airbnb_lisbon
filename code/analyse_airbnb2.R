@@ -9,6 +9,11 @@ library(Hmisc)
 library(knitr)
 library(kableExtra)
 library(xtable)
+library(moments)
+library(cowplot)
+
+#source(paste0(w_dir,'/code/helper.R'))
+source('https://raw.githubusercontent.com/zsomborh/airbnb_lisbon/main/code/helper.R')
 
 w_dir = 'C:/Users/T450s/Desktop/programming/git/airbnb_lisbon'
 df <- read_csv('https://raw.githubusercontent.com/zsomborh/airbnb_lisbon/main/data/clean/cleaned_airbnb.csv')
@@ -41,58 +46,213 @@ reviews <- c('number_of_reviews', 'review_scores_rating','reviews_per_month', 'f
 amenities <- colnames(df)[!colnames(df) %in% c('id',target_var, basic_vars, host_info,host_info,reviews)]
 
 
+# EDA
+
+df <- df %>% mutate(
+    ln_price = log(price)
+)
+
+df %>%
+    group_by(property_type) %>%
+    dplyr::summarize(mean_price = mean(price, na.rm=TRUE))
+
+Hmisc::describe(df$price)
+
+
+g3a <- ggplot(data=df, aes(x=price)) +
+    geom_histogram(aes(x = price), binwidth = 30, color = 'black', fill = 'navyblue', alpha = .8) +
+    labs(x = "Price (EUR)",y = "Count")+
+    theme_minimal() 
+g3a
+
+g3b <- ggplot(data=df, aes(x=ln_price)) +
+    geom_histogram(aes(x = ln_price), binwidth = .2, color = 'black', fill = 'navyblue', alpha = .8) +
+    labs(x = "Ln Price (EUR)",y = "Count")+
+    theme_minimal() 
+g3b
+
+
+g4 <- ggplot(data = df, aes(x = property_type, y = price)) +
+    stat_boxplot(aes(group = property_type), geom = "errorbar", width = 0.3,
+                 #color = c(color[2],color[1], color[3]), 
+                 size = 0.5, na.rm=T)+
+    geom_boxplot(aes(group = property_type),
+                 #color = c(color[2],color[1], color[3]), fill = c(color[2],color[1], color[3]),
+                 size = 0.5, width = 0.6, alpha = 0.3, na.rm=T, outlier.shape = NA) +
+    scale_y_continuous(expand = c(0.01,0.01),limits = c(0,200), breaks = seq(0,200,50)) +
+    labs(x = "Property_type",y = "Price (EUR)")+
+    theme_minimal()
+
+
+g4
+
+g5 <- ggplot(df, aes(x = factor(accommodates), y = price,
+                        fill = factor(property_type), color=factor(property_type))) +
+    geom_boxplot(alpha=0.8, na.rm=T, outlier.shape = NA, width = 0.8) +
+    scale_color_manual( name = '', values = c('black', 'black')) +
+    scale_fill_manual( name = '', values = c('navyblue', 'purple4')) +
+    stat_boxplot(geom = "errorbar", width = 0.8, size = 0.3, na.rm=T)+
+    labs(x = "Accomodates (Persons)",y = "Price (EUR)")+
+    theme_minimal() +
+    theme(legend.position = c(0.15,0.8))+
+    scale_y_continuous(expand = c(0.01,0.01), limits=c(0, 250), breaks = seq(0,250, 50))
+g5
+
+
+# a few plots to check interactions
+p1 <- price_diff_by_variables2(df, "property_type", "coffee_maker", "Property type", 'Coffee Maker')
+p2 <- price_diff_by_variables2(df, "property_type", "wifi", "Property type", 'Wifi')
+p3 <- price_diff_by_variables2(df, "property_type", "dishwasher", "Property type", 'Dishwasher') # looks good
+p4 <- price_diff_by_variables2(df, "property_type", "elevator", "Property type", 'Elevator')
+p5 <- price_diff_by_variables2(df, "property_type", "lock_on_bedroom_door", "Property type", 'Lock on bedroom')
+p6 <- price_diff_by_variables2(df, "property_type", "microwave", "Property type", 'Microwave')
+p7 <- price_diff_by_variables2(df, "property_type", "kitchen", "Property type", 'Kitchen') # looks good
+p8 <- price_diff_by_variables2(df, "property_type", "lockbox", "Property type", 'LockBox') # looks good 
+p9<- price_diff_by_variables2(df, "property_type", 'luggage_dropoff_allowed', "Property type",'Luggage dropoff')
+p10<- price_diff_by_variables2(df, "property_type", 'patio_or_balcony', "Property type", 'Balcony avaialable') # looks good
+p11<- price_diff_by_variables2(df, "property_type", 'refrigerator', "Property type", 'Fridge')
+p12<- price_diff_by_variables2(df, "property_type", 'self_checkin', "Property type", 'Self Check-in') # looks good 
+
+interaction_plot <- plot_grid(p1, p2, p3, p4, p5, p6, p7 ,p8, p9, p10, p11,p12, nrow=3, ncol=4)
+interaction_plot
+
+
+# Feature/target engineering -----------------------------------------------------
+
+
+
+#Create log transformations on continuous variables where skewness is above .5 or below -5 - we  consider those to be skewed  
+
+cont_vars <- c('minimum_nights', 'bedrooms','beds','bathrooms', 'host_since', 'host_listings_count', 'review_scores_rating', 'reviews_per_month', 'number_of_reviews')
+
+df <- get_lns(df,cont_vars,0.5)
+
+ln_vars <- colnames(df)[!colnames(df) %in% c(basic_vars,host_info,reviews,amenities,'id', 'price')]
+
+
+# Create interaction variables - a few handpicked from EDA phase and all amenities + property type 
+interactions1 <- c('property_type * dishwasher',
+                   'property_type * kitchen',
+                   'property_type * lockbox',
+                   'property_type * patio_or_balcony',
+                   'property_type * self_checkin'
+)
+
+interactions2 <- c(paste0('property_type * (',paste(amenities, collapse = '+'),')'))
+
+# Transform outcome variable 
+
+df <- df %>% mutate(
+    ln_price = log(price)
+)
+
+# correct for ln 
+
+df <- df %>% mutate(
+    ln_minimum_nights =       ifelse(is.infinite(ln_minimum_nights),0,ln_minimum_nights),
+    ln_bedrooms =             ifelse(is.infinite(ln_bedrooms),0,ln_bedrooms),
+    ln_beds=                  ifelse(is.infinite(ln_beds),0,ln_beds),
+    ln_bathrooms =            ifelse(is.infinite(ln_bathrooms),0,ln_bathrooms),
+    ln_host_listings_count =  ifelse(is.infinite(ln_host_listings_count),0,ln_host_listings_count),
+    ln_review_scores_rating = ifelse(is.infinite(ln_review_scores_rating),0,ln_review_scores_rating),
+    ln_reviews_per_month =    ifelse(is.infinite(ln_reviews_per_month),0,ln_reviews_per_month),
+    ln_number_of_reviews =    ifelse(is.infinite(ln_number_of_reviews),0,ln_number_of_reviews),
+    ln_price =                ifelse(is.infinite(ln_price),0,ln_price)
+)
+
+for (i in c('ln_price',ln_vars)){
+    print(paste0(i,'- no. infs is: ',sum(is.infinite(unlist(df[,i]))), ', no. of NAs is: ', sum(is.na(unlist(df[,i]))), ', no.of NaNs is: ', sum(is.nan(unlist(df[,i])))) )
+}
+
+sum(is.nan(df$ln_bathrooms))
+#create predictors sets
+tf <- df[,ln_vars] 
+
+predictors_1 <- c(basic_vars)
+predictors_2 <- c(basic_vars, host_info, reviews, amenities)
+
+transformed <- substring(ln_vars,4)
+
+predictors_transformed_small <- c(predictors_2[!predictors_2 %in% transformed],interactions1,ln_vars)
+predictors_transformed_big <- c(predictors_2[!predictors_2 %in% transformed],interactions2,ln_vars)
+
+
+# Modeling ----------------------------------------------------------------
+
 #  create holdout set 
-set.seed(2801)
+set.seed(7)
 
 train_indices <- as.integer(createDataPartition(df$price, p = 0.75, list = FALSE))
 df_train <- df[train_indices, ]
 df_holdout <- df[-train_indices, ]
 
-#feature_engineering 
-# TODO - get log transformation for skewed predictors
-library(moments)
-
-numeric_vars <- 
-
-# TODO - create interaction variables  - property type vs dummies/accomodates/dogs/cats
-# TODO - get log transformed outcome variable 
-
-predictors_1 <- c(basic_vars)
-predictors_2 <- c(basic_vars, host_info, reviews, amenities)
-#predictors_3 <- c(predictors2 -- and interactions and log transformed variables
-
-
-
-# Modeling ----------------------------------------------------------------
 
 # train control is 5 fold cross validation
 train_control <- trainControl(method = "cv",
                               number = 5,
                               verboseIter = FALSE)
 
-
-# Starting off with simple OLS 
+View(head(df[,ln_vars],100))
+# Starting off with simple OLSs 
 
 set.seed(7)
 system.time({
-  ols_model <- train(
-    formula(paste0("price ~", paste0(predictors_2, collapse = " + "))),
+  ols_model1 <- train(
+    formula(paste0("price ~", paste0(predictors_1, collapse = " + "))),
     data = df_train,
     method = "lm",
     trControl = train_control
   )
 })
+set.seed(7)
+system.time({
+    ols_model2 <- train(
+        formula(paste0("price ~", paste0(predictors_2, collapse = " + "))),
+        data = df_train,
+        method = "lm",
+        trControl = train_control
+    )
+})
 
-ols_model_coeffs <-  ols_model$finalModel$coefficients
-ols_model_coeffs_df <- data.frame(
-  "variable" = names(ols_model_coeffs),
-  "ols_coefficient" = ols_model_coeffs
+set.seed(7)
+system.time({
+    ols_model3 <- train(
+        formula(paste0("price ~", paste0(predictors_transformed_small, collapse = " + "))),
+        data = df_train,
+        method = "lm",
+        trControl = train_control
+    )
+})
+
+
+ols_model_coeffs1 <-  ols_model1$finalModel$coefficients
+ols_model_coeffs_df1 <- data.frame(
+  "variable" = names(ols_model_coeffs1),
+  "ols_coefficient" = ols_model_coeffs1
 ) %>%
   mutate(variable = gsub("`","",variable))
 
 
+ols_model_coeffs2 <-  ols_model2$finalModel$coefficients
+ols_model_coeffs_df2 <- data.frame(
+    "variable" = names(ols_model_coeffs2),
+    "ols_coefficient" = ols_model_coeffs2
+) %>%
+    mutate(variable = gsub("`","",variable))
+
+
+ols_model_coeffs3 <-  ols_model3$finalModel$coefficients
+ols_model_coeffs_df3 <- data.frame(
+    "variable" = names(ols_model_coeffs3),
+    "ols_coefficient" = ols_model_coeffs3
+) %>%
+    mutate(variable = gsub("`","",variable))
+
+
+
 # Second is Lasso
 
+# TODO: reparametise
 set.seed(7)
 system.time({
   lasso_model <- train(
@@ -105,6 +265,19 @@ system.time({
   )
 })
 
+set.seed(7)
+system.time({
+    lasso_model2 <- train(
+        formula(paste0("price ~", paste0(predictors_transformed_big, collapse = " + "))), #Change predictors to contain interactions... 
+        data = df_train,
+        method = "glmnet",
+        preProcess = c("center", "scale"),
+        tuneGrid =  expand.grid("alpha" = 1, "lambda" = seq(0.01, 0.25, by = 0.01)),
+        trControl = train_control
+    )
+})
+
+
 lasso_coeffs <- coef(
   lasso_model$finalModel,
   lasso_model$bestTune$lambda) %>%
@@ -115,11 +288,49 @@ lasso_coeffs <- coef(
 
 lasso_coeffs_non_null <- lasso_coeffs[!lasso_coeffs$lasso_coefficient == 0,]
 
-regression_coeffs <- merge(ols_model_coeffs_df, lasso_coeffs_non_null, by = "variable", all=TRUE)
 
-# Third is CART
-# CART
-set.seed(1234)
+lasso_coeffs2 <- coef(
+    lasso_model2$finalModel,
+    lasso_model2$bestTune$lambda) %>%
+    as.matrix() %>%
+    as.data.frame() %>%
+    rownames_to_column(var = "variable") %>%
+    rename(lasso_coefficient = `1`) 
+
+lasso_coeffs_non_null2 <- lasso_coeffs2[!lasso_coeffs2$lasso_coefficient == 0,]
+
+# TODO put everything in one 
+regression_coeffs <- merge(ols_model_coeffs_df1,ols_model_coeffs_df2,ols_model_coeffs_df3, lasso_coeffs_non_null,lasso_coeffs_non_null2, by = "variable", all=TRUE)
+
+
+
+# Check OLS, Lasso performance: 
+
+temp_models <-
+    list("OLS1" = ols_model1,
+         "OLS2" = ols_model2,
+         "OLS3" = ols_model3,
+         "LASSO1 (model w/ few interactions)" = lasso_model,
+         "LASSO2 (model w/ all interactions)" = lasso_model2)
+
+result_temp <- resamples(results_temp) %>% summary()
+
+result_temp2 <- imap(temp_models, ~{
+    mean(results$values[[paste0(.y,"~RMSE")]])
+}) %>% unlist() %>% as.data.frame() %>%
+    rename("CV RMSE" = ".")
+
+result_temp
+result_temp2
+
+# based on cross validated RMSEs, it makes sense to increase model complexity to some extent, but 
+# It doesn't do a lot of improvement on OLS to include interactions/ln transformations
+
+# moving to tree based models
+
+# CART --------------------------------------------------------------------
+
+set.seed(7)
 system.time({
   cart_model <- train(
     formula(paste0("price ~", paste0(predictors_2, collapse = " + "))),
@@ -174,9 +385,10 @@ gbm_model
 
 # Final models
 
+
 final_models <-
-  list("OLS" = ols_model,
-       "LASSO (model w/ interactions)" = lasso_model,
+  list("OLS3" = ols_model3,
+       "LASSO (model w/ all interactions)" = lasso_model2,
        "CART" = cart_model,
        "Random forest" = rf_model,
        "GBM" = gbm_model)
@@ -184,11 +396,6 @@ final_models <-
 results <- resamples(final_models) %>% summary()
 
 #Evaluate models
-
-result_4 <- imap(final_models, ~{
-  mean(results$values[[paste0(.y,"~RMSE")]])
-}) %>% unlist() %>% as.data.frame() %>%
-  rename("CV RMSE" = ".")
 
 #kable(x = result_4, format = "latex", digits = 3, booktabs=TRUE, linesep = "") %>%
 #  cat(.,file= paste0(output,"horse_race_of_models_cv_rmse.tex"))
@@ -318,7 +525,7 @@ c <- df_holdout_w_prediction %>%
 # result_3 <- rbind(line1, a, line2, b, line3, c) %>%
 # transform(RMSE = as.numeric(RMSE), `Mean price` = as.numeric(`Mean price`), RMSE/price` = as.numeric(`RMSE/price`))
 
-
+# Groupped variable importance
 rf_model_var_imp <- importance(rf_model$finalModel)/1000
 rf_model_var_imp_df <-
     data.frame(varname = names(rf_model_var_imp),imp = rf_model_var_imp) %>%
