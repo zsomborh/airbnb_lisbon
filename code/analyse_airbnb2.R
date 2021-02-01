@@ -121,10 +121,10 @@ interaction_plot
 
 cont_vars <- c('minimum_nights', 'bedrooms','beds','bathrooms', 'host_since', 'host_listings_count', 'review_scores_rating', 'reviews_per_month', 'number_of_reviews')
 
-df <- get_lns(df,cont_vars,0.5)
+df <- get_lns(df,cont_vars,5)
 
 ln_vars <- colnames(df)[!colnames(df) %in% c(basic_vars,host_info,reviews,amenities,'id', 'price')]
-ln_vars
+
 
 # Create interaction variables - a few handpicked from EDA phase and all amenities + property type 
 interactions1 <- c('property_type * dishwasher',
@@ -146,13 +146,13 @@ df <- df %>% mutate(
 
 df <- df %>% mutate(
     ln_minimum_nights =       ifelse(is.infinite(ln_minimum_nights),0,ln_minimum_nights),
-    ln_bedrooms =             ifelse(is.infinite(ln_bedrooms),0,ln_bedrooms),
-    ln_beds=                  ifelse(is.infinite(ln_beds),0,ln_beds),
-    ln_bathrooms =            ifelse(is.infinite(ln_bathrooms),0,ln_bathrooms),
+#    ln_bedrooms =             ifelse(is.infinite(ln_bedrooms),0,ln_bedrooms),
+#    ln_beds=                  ifelse(is.infinite(ln_beds),0,ln_beds),
+#    ln_bathrooms =            ifelse(is.infinite(ln_bathrooms),0,ln_bathrooms),
     ln_host_listings_count =  ifelse(is.infinite(ln_host_listings_count),0,ln_host_listings_count),
-    ln_review_scores_rating = ifelse(is.infinite(ln_review_scores_rating),0,ln_review_scores_rating),
-    ln_reviews_per_month =    ifelse(is.infinite(ln_reviews_per_month),0,ln_reviews_per_month),
-    ln_number_of_reviews =    ifelse(is.infinite(ln_number_of_reviews),0,ln_number_of_reviews),
+#    ln_review_scores_rating = ifelse(is.infinite(ln_review_scores_rating),0,ln_review_scores_rating),
+#    ln_reviews_per_month =    ifelse(is.infinite(ln_reviews_per_month),0,ln_reviews_per_month),
+#    ln_number_of_reviews =    ifelse(is.infinite(ln_number_of_reviews),0,ln_number_of_reviews),
     ln_price =                ifelse(is.infinite(ln_price),0,ln_price)
 )
 
@@ -160,7 +160,6 @@ for (i in c('ln_price',ln_vars)){
     print(paste0(i,'- no. infs is: ',sum(is.infinite(unlist(df[,i]))), ', no. of NAs is: ', sum(is.na(unlist(df[,i]))), ', no.of NaNs is: ', sum(is.nan(unlist(df[,i])))) )
 }
 
-sum(is.nan(df$ln_bathrooms))
 #create predictors sets
 
 predictors_1 <- c(basic_vars)
@@ -219,7 +218,6 @@ system.time({
 })
 
 
-
 ols_model_coeffs1 <-  ols_model1$finalModel$coefficients
 ols_model_coeffs_df1 <- data.frame(
   "variable" = names(ols_model_coeffs1),
@@ -250,7 +248,7 @@ ols_model_coeffs_df3 <- data.frame(
 set.seed(7)
 system.time({
   lasso_model <- train(
-    formula(paste0("price ~", paste0(predictors_2, collapse = " + "))),  
+    formula(paste0("price ~", paste0(predictors_transformed_small, collapse = " + "))),  
     data = df_train,
     method = "glmnet",
     preProcess = c("center", "scale"),
@@ -298,15 +296,14 @@ regression_coeffs <- merge(ols_model_coeffs_df1,ols_model_coeffs_df2,ols_model_c
 # Check OLS, Lasso performance: 
 
 temp_models <-
-    list("OLS1" = ols_model1,
-         "OLS2" = ols_model2,
-         "OLS3" = ols_model3,
-         "LASSO1 (model w/ few interactions)" = lasso_model,
-         "LASSO2 (model w/ all interactions)" = lasso_model2)
+    list("OLS - base" = ols_model1,
+         "OLS - comp" = ols_model2,
+         "OLS - comp w/ few interactions" = ols_model3,
+         "LASSO1 - w/ few interactions" = lasso_model,
+         "LASSO2 - w/ all interactions" = lasso_model2)
 
 result_temp <- resamples(temp_models) %>% summary()
 
-result_temp
 
 result_rmse <- imap(temp_models, ~{
     mean(result_temp$values[[paste0(.y,"~RMSE")]])
@@ -318,9 +315,13 @@ result_holdout <- map(temp_models, ~{
 }) %>% unlist() %>% as.data.frame() %>%
     rename("Holdout RMSE" = ".")
 
-result_temp
-result_rmse
-result_holdout
+
+a <- names(temp_models)
+b <- result_rmse$`CV RMSE`
+c <- result_holdout$`Holdout RMSE`
+tf <- data.frame(a,b,c)
+colnames(tf) <- c('Model', 'CV RMSE', 'Holdout RMSE')
+tf
 
 # based on cross validated RMSEs, it makes sense to increase model complexity to some extent, but 
 # It doesn't do a lot of improvement on OLS to include interactions/ln transformations
@@ -328,7 +329,6 @@ result_holdout
 
 # MOdeling with tree based models  --------------------------------------------------------------------
 
-# TODO: pruning, tuning  
 
 set.seed(7)
 system.time({
@@ -383,9 +383,22 @@ system.time({
 })
 gbm_model
 
-# Final models
+# saving models so that we don't have to rerun them in rmd
+
+saveRDS(ols_model1,'ols_model.rds')
+saveRDS(ols_model2,'ols_model2.rds')
+saveRDS(ols_model3,'ols_model3.rds')
+
+saveRDS(lasso_model,'lasso_model.rds')
+saveRDS(lasso_model2,'lasso_model2.rds')
+
+saveRDS(rf_model, 'random_forest.rds')
+saveRDS(gbm_model, 'gbm.rds')
+
+rf_podel <- readRDS('random_forest.rds')
 
 
+# Final models results
 final_models <-
   list("OLS3" = ols_model3,
        "LASSO (model w/ all interactions)" = lasso_model2,
