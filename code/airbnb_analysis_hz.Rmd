@@ -1,0 +1,156 @@
+---
+title: "Airbnb price prediction - Lisbon"
+author: "Fanni Kiss & Zsombor Hegedus"
+date: '2021 január 31 '
+output: 
+    prettydoc::html_pretty:
+    theme: architect
+    highlight: vignette
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r pack_n_load, include=FALSE}
+rm(list = ls())
+
+library(tidyverse)
+library(data.table)
+library(rattle)
+library(caret)
+library(ranger)
+library(Hmisc)
+library(knitr)
+library(kableExtra)
+library(xtable)
+library(moments)
+library(cowplot)
+library(ggpubr)
+
+#source(paste0(w_dir,'/code/helper.R'))
+source('https://raw.githubusercontent.com/zsomborh/airbnb_lisbon/main/code/helper.R')
+
+w_dir = 'C:/Users/T450s/Desktop/programming/git/airbnb_lisbon'
+df <- read_csv('https://raw.githubusercontent.com/zsomborh/airbnb_lisbon/main/data/clean/cleaned_airbnb.csv')
+
+df <- df %>% mutate(
+  property_type = as.factor(property_type),
+  ln_price = log(price)
+)
+
+colnames(df) <- tolower(colnames(df))
+```
+
+## Summary
+
+Our goal is to help our client price the rental fee for short time use of their small and mid-size apartments in Lisbon. In order to do so we built price predictor models based on a recent date: 20th Dec, 2020 using publicly available data on [Inside Airbnb](http://insideairbnb.com/get-the-data.html). Our main features captured information about the host, the number and quality of previous guest experiences, features of the accomodation and ultimately price, which was our target variable. We built several machine learning models such as OLS, Lasso, CART, GBM but in the end a random forest model was chosen as the best out of the lot. We evaluated the models with 5-fold cross validation both on a work and holdout set with RMSE being our loss function where the random forest was superior. We believe that our model is robust and can be of great help for our client both in case they want to advertise their accomodations with separate rooms or as whole apartments as well. 
+
+## Airbnb data 
+
+In order to be able to build our models we did a heavy cleaning on the data downloaded from Inside Airbnb. We were informed that the client owns real estate in the heart of Lisbon only and that they own apartments that can accomodate 2-6 people only, so we narrowed our scope accordingly. We got rid of observations that do not belong to Lisbon or were not apartments (we also included condominimums) or apartment rooms for 2-6 people. Whether a property is a full apartment or a room is going to be very important furthermore in this analysis, because we want to show the client what options they have were they to decide to rent out not only full apartments but separate rooms as well. Furthermore, we excluded observations where the price was more than EUR1000/night as those were considered to be extreme values that are either erroneous or very much outside of the client's expectation. We aimed to keep as many variables as possible and dropped missing values only in rare cases, so we used imputation when that was necessary. The cleaning steps are documented in our [github repo](https://github.com/zsomborh/airbnb_lisbon/blob/main/code/clean_airbnb.R).
+
+Overall we included variables that could be grouped into the following categories: 
+
+- **Base Variables**: Such were the number of bedrooms, bathrooms, accommodates, the type of property which was either apartmant or room and the minimum nights one has to stay in the accommodation.
+- **Host Information**: These variables were of the host of the apartmant such as the number of years they were hosts on Airbnb, how many listed apartmants they have, whether their identity is verified or if they are superhosts.
+- **Reviews**: This category aims to capture the kind of feedback the accommodation received from the guests so far - these are the number of reviews, the average rating it received from clients from 1-10 and the amount of rating they receive in a month on average. 
+- **Amenities**: These capture the extras that an accomodation can offer e.g.: whether it has a kitchen, coffee machine, or has locks on the door - from modeling perspective all such tags that were used more than 100 times were converted to dummies (e.g if accommodation has shampoo tag, it will receive a 1, and 0 otherwise). We decided not to keep them all as some tags appeared very infrequently and such low variation in a predictor would just throw off the model as opposed to improving it. 
+
+## EDA
+
+Our target variable is price, a right skewed variable with a long right tail. On average in our sample apartmant costed almost twice as much as rooms, which is perfectly understandable given that the freedom of a whole apartment is something that people are willing to pay more. In total we have a bit more than 11k observations in which the number of apartments is almost four times more than the number of rooms. 
+
+```{r table 1, echo = FALSE , results = "asis", warning = FALSE, message = FALSE }
+
+price_sum <- df %>% group_by(property_type) %>% summarise(
+    mean     = mean(price),
+    median   = median(price),
+    std      = sd(price),
+    iq_range = IQR(price), 
+    min      = min(price),
+    max      = max(price),
+    skew     = skewness(price),
+    numObs   = sum( !is.na( price ) ) )
+
+knitr::kable(price_sum, caption= 'Descriptive statistics of price for rooms and apartmants', digits = c(0,rep(2,ncol(price_sum)-2),0)) 
+```
+
+```{r fig 1, fig.width=10,fig.height=4, fig.cap='Distribution of apartment and room prices 20th Dec, 2020', echo = FALSE , results = "asis", warning = FALSE, message = FALSE }
+p1 <- ggplot( data = df[df$property_type == 'apartment',] , aes( x = price ) ) +
+    geom_histogram( aes(y = ..density..) , alpha = 1, binwidth = 30, color = 'black', fill = 'navyblue') +
+    geom_density( aes(y = ..density..) , alpha = .5 , bw = 50, color = 'black', fill='steelblue') +
+    labs(x='Price distribution of apartments',y='Density') + theme_minimal() 
+
+p2 <- ggplot( data = df[df$property_type == 'room',] , aes( x = price ) ) +
+    geom_histogram( aes(y = ..density..) , alpha = 1, binwidth = 30, color = 'black', fill = 'purple4') +
+    geom_density( aes(y = ..density..) , alpha = .5 , bw = 50, color = 'black', fill='darkorchid2') +
+    labs(x='Price distribution of rooms',y='Density') + theme_minimal() 
+
+ggarrange(p1, p2, nrow = 1 )
+```
+
+We also created boxplots to further highlight the differnces in price for certain categories. We could see from the density plots but also in the first boxplot the nature of the difference in average price for rooms and apartments. Another important but trivial observation we can conclude from the second boxplot is that  
+
+
+```{r fig 2, fig.width=10,fig.height=8, fig.cap='Boxplot of price by property type and number of accomodates', echo = FALSE , results = "asis", warning = FALSE, message = FALSE }
+
+plotdf <- df %>% mutate(
+    host_cat = ifelse(host_since <=3, '0-3 yrs', ifelse(host_since <= 7, '4-7 yrs','7+yrs')),
+    score_cat = ifelse(review_scores_rating <= 80, '0-80', 
+                       ifelse(review_scores_rating <= 85, '81-85', 
+                              ifelse( review_scores_rating <= 90, '86-90',
+                                      ifelse(review_scores_rating <= 95, '91-95', '96-100')))),
+    min_cat = ifelse(minimum_nights ==1, '1 night',
+                     ifelse(minimum_nights == 2, '2 nights', 
+                        ifelse(minimum_nights == 3, '3 nights', '4+ nights')))) %>% 
+    select(bedrooms,property_type, accommodates, host_cat,score_cat, price, min_cat)
+
+p1 <- ggplot(plotdf, aes(x = factor(min_cat), y = price,
+                        fill = factor(property_type), color=factor(property_type))) +
+    geom_boxplot(alpha=0.8, na.rm=T, outlier.shape = NA, width = 0.8) +
+    scale_color_manual( name = '', values = c('black', 'black')) +
+    scale_fill_manual( name = '', values = c('navyblue', 'purple4')) +
+    stat_boxplot(geom = "errorbar", width = 0.8, size = 0.3, na.rm=T)+
+    labs(x = "Minimum nights",y = "Price (EUR)")+
+    theme_minimal() +
+    theme(legend.position = c(0.15,0.8))+
+    scale_y_continuous(expand = c(0.01,0.01), limits=c(0, 250), breaks = seq(0,250, 50))
+
+p2 <- ggplot(plotdf, aes(x = factor(accommodates), y = price,
+                        fill = factor(property_type), color=factor(property_type))) +
+    geom_boxplot(alpha=0.8, na.rm=T, outlier.shape = NA, width = 0.8) +
+    scale_color_manual( name = '', values = c('black', 'black')) +
+    scale_fill_manual( name = '', values = c('navyblue', 'purple4')) +
+    stat_boxplot(geom = "errorbar", width = 0.8, size = 0.3, na.rm=T)+
+    labs(x = "Accomodates (Persons)",y = "Price (EUR)")+
+    theme_minimal() +
+    theme(legend.position = c(0.15,0.8))+
+    scale_y_continuous(expand = c(0.01,0.01), limits=c(0, 250), breaks = seq(0,250, 50))
+
+p3 <- ggplot(plotdf, aes(x = factor(host_cat), y = price,
+                        fill = factor(property_type), color=factor(property_type))) +
+    geom_boxplot(alpha=0.8, na.rm=T, outlier.shape = NA, width = 0.8) +
+    scale_color_manual( name = '', values = c('black', 'black')) +
+    scale_fill_manual( name = '', values = c('navyblue', 'purple4')) +
+    stat_boxplot(geom = "errorbar", width = 0.8, size = 0.3, na.rm=T)+
+    labs(x = "How long host is present in Airbnb",y = "Price (EUR)")+
+    theme_minimal() +
+    theme(legend.position = c(0.15,0.8))+
+    scale_y_continuous(expand = c(0.01,0.01), limits=c(0, 200), breaks = seq(0,200, 50))
+
+p4 <- ggplot(plotdf, aes(x = factor(score_cat), y = price,
+                        fill = factor(property_type), color=factor(property_type))) +
+    geom_boxplot(alpha=0.8, na.rm=T, outlier.shape = NA, width = 0.8) +
+    scale_color_manual( name = '', values = c('black', 'black')) +
+    scale_fill_manual( name = '', values = c('navyblue', 'purple4')) +
+    stat_boxplot(geom = "errorbar", width = 0.8, size = 0.3, na.rm=T)+
+    labs(x = "Review scores",y = "Price (EUR)")+
+    theme_minimal() +
+    theme(legend.position = c(0.15,0.8))+
+    scale_y_continuous(expand = c(0.01,0.01), limits=c(0, 200), breaks = seq(0,200, 50))
+
+
+ggarrange(p1,p2,p3,p4, nrow = 2, ncol = 2)
+```
