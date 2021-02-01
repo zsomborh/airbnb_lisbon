@@ -116,8 +116,8 @@ p1 <- ggplot(plotdf, aes(x = factor(min_cat), y = price,
     stat_boxplot(geom = "errorbar", width = 0.8, size = 0.3, na.rm=T)+
     labs(x = "Minimum nights",y = "Price (EUR)")+
     theme_minimal() +
-    theme(legend.position = c(0.15,0.8))+
-    scale_y_continuous(expand = c(0.01,0.01), limits=c(0, 250), breaks = seq(0,250, 50))
+    theme(legend.position = c(0.15,0.9))+
+    scale_y_continuous(expand = c(0.01,0.01), limits=c(0, 210), breaks = seq(0,210, 50))
 
 p2 <- ggplot(plotdf, aes(x = factor(accommodates), y = price,
                         fill = factor(property_type), color=factor(property_type))) +
@@ -127,8 +127,8 @@ p2 <- ggplot(plotdf, aes(x = factor(accommodates), y = price,
     stat_boxplot(geom = "errorbar", width = 0.8, size = 0.3, na.rm=T)+
     labs(x = "Accomodates (Persons)",y = "Price (EUR)")+
     theme_minimal() +
-    theme(legend.position = c(0.15,0.8))+
-    scale_y_continuous(expand = c(0.01,0.01), limits=c(0, 250), breaks = seq(0,250, 50))
+    theme(legend.position = c(0.15,0.9))+
+    scale_y_continuous(expand = c(0.01,0.01), limits=c(0, 210), breaks = seq(0,210, 50))
 
 p3 <- ggplot(plotdf, aes(x = factor(host_cat), y = price,
                         fill = factor(property_type), color=factor(property_type))) +
@@ -138,7 +138,7 @@ p3 <- ggplot(plotdf, aes(x = factor(host_cat), y = price,
     stat_boxplot(geom = "errorbar", width = 0.8, size = 0.3, na.rm=T)+
     labs(x = "How long host is present in Airbnb",y = "Price (EUR)")+
     theme_minimal() +
-    theme(legend.position = c(0.15,0.8))+
+    theme(legend.position = c(0.15,0.95))+
     scale_y_continuous(expand = c(0.01,0.01), limits=c(0, 200), breaks = seq(0,200, 50))
 
 p4 <- ggplot(plotdf, aes(x = factor(score_cat), y = price,
@@ -149,7 +149,7 @@ p4 <- ggplot(plotdf, aes(x = factor(score_cat), y = price,
     stat_boxplot(geom = "errorbar", width = 0.8, size = 0.3, na.rm=T)+
     labs(x = "Review scores",y = "Price (EUR)")+
     theme_minimal() +
-    theme(legend.position = c(0.15,0.8))+
+    theme(legend.position = c(0.15,0.95))+
     scale_y_continuous(expand = c(0.01,0.01), limits=c(0, 200), breaks = seq(0,200, 50))
 
 
@@ -160,7 +160,7 @@ ggarrange(p1,p2,p3,p4, nrow = 2, ncol = 2)
 
 We had 94 predictors out of which 80 were made from the amenities. When it came to amenities, functional for was not really a question as they were dummy variables. From the remainder, we mostly had discrete numeric variables with a smaller range (e.g. bedrooms were between 1 to 7) most of which were quite skewed. We decided that log transformation would not really help in most of the cases due to the limited number of possible $x$ values, but we did transform the number of minimum nights and the listings count that the host had.
 
-We were also trying to search for possible useful interactions from the sea of variables that we had. For this we handpicked a few amenities that we thought could make a difference in someone's choosing (we have used Airbnb services before and tried to use our own experience in deciding) and also tried to pick out those that were used relatively frequently and check their interaction with the `property_type`. For visual demonstration we created 12 plots out of which we identified 4 potentially useful interactions. 
+We were also trying to search for possible useful interactions from the sea of variables that we had. For this we handpicked a few amenities that we thought could make a difference in someone's choosing (we have used Airbnb services before and tried to use our own experience in deciding) and also tried to pick out those that were used relatively frequently and check their interaction with the `property_type`. For visual demonstration we created 12 plots out of which we identified 5 potentially useful interactions. 
 
 ```{r fig 3, fig.width=10,fig.height=8, fig.cap='Bar plots of average prices for handpicked amenities interacting with property types', echo = FALSE , results = "asis", warning = FALSE, message = FALSE }
 p1 <- price_diff_by_variables2(df, "property_type", "coffee_maker", "Property type", 'Coffee Maker')
@@ -254,11 +254,11 @@ lasso_model2 <- readRDS( paste0(w_dir,'/models/lasso_model2.rds'))
 
 
 temp_models <-
-    list("OLS - basic variables" = ols_model1,
-         "OLS2 - all variables without transformation" = ols_model2,
-         "OLS3 - variables with ln transformation and interactions" = ols_model3,
-         "LASSO1 - all variables  w/ few interactions + ln transformations" = lasso_model,
-         "LASSO2 - all variables  w/ all interactions + ln transformations" = lasso_model2)
+    list("OLS - base" = ols_model1,
+         "OLS - comp" = ols_model2,
+         "OLS - comp w/ few interactions" = ols_model3,
+         "LASSO1 - w/ few interactions" = lasso_model,
+         "LASSO2 - w/ all interactions" = lasso_model2)
 
 result_temp <- resamples(temp_models) %>% summary()
 
