@@ -383,6 +383,9 @@ system.time({
 })
 gbm_model
 
+
+
+
 # saving models so that we don't have to rerun them in rmd
 
 saveRDS(ols_model1,'ols_model.rds')
@@ -391,6 +394,8 @@ saveRDS(ols_model3,'ols_model3.rds')
 
 saveRDS(lasso_model,'lasso_model.rds')
 saveRDS(lasso_model2,'lasso_model2.rds')
+
+saveRDS(cart_model, 'cart.rds')
 
 saveRDS(rf_model, 'random_forest.rds')
 saveRDS(gbm_model, 'gbm.rds')
