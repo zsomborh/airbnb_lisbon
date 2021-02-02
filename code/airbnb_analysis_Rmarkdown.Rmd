@@ -1,7 +1,7 @@
 ---
 title: "Airbnb price prediction - Lisbon"
 author: "Fanni Kiss & Zsombor Hegedus"
-date: '2021 január 31 '
+date: '2021 Feb 2nd '
 output:
     prettydoc::html_pretty:
      theme: architect
