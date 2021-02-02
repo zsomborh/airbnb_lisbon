@@ -1,0 +1,524 @@
+---
+title: "Airbnb price prediction - Lisbon"
+author: "Fanni Kiss & Zsombor Hegedus"
+date: '2021 január 31 '
+output:
+    prettydoc::html_pretty:
+     theme: architect
+     highlight: github
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r pack_n_load, include=FALSE}
+rm(list = ls())
+
+library(tidyverse)
+library(data.table)
+library(rattle)
+library(caret)
+library(ranger)
+library(Hmisc)
+library(knitr)
+library(kableExtra)
+library(xtable)
+library(moments)
+library(cowplot)
+library(ggpubr)
+
+#source(paste0(w_dir,'/code/helper.R'))
+source('https://raw.githubusercontent.com/zsomborh/airbnb_lisbon/main/code/helper.R')
+
+w_dir = 'C:/Users/Fandurka/Google Drive/CEU/DA3/Assignment1/airbnb_repo/airbnb_lisbon'
+df <- read_csv('https://raw.githubusercontent.com/zsomborh/airbnb_lisbon/main/data/clean/cleaned_airbnb.csv')
+
+df <- df %>% mutate(
+  property_type = as.factor(property_type),
+  ln_price = log(price)
+)
+
+colnames(df) <- tolower(colnames(df))
+```
+
+## Executive summary
+
+Our goal is to help our client to price the rental fee for short time use of their small and mid-size apartments in Lisbon. In order to do so, we built price predictor models based on the most recent date: 20th Dec, 2020 using publicly available data scraped from Airbnb on [Inside Airbnb](http://insideairbnb.com/get-the-data.html). Our features captured information about the host, the number and quality of previous guest experiences, details of the accommodation and ultimately the price, which was our target variable. We built several machine learning models such as OLS, Lasso, CART, GBM, but in the end, a random forest model was chosen as the best out of the lot. We evaluated the models with 5-fold cross-validation both on a work and holdout set with RMSE being our loss function where the random forest was superior. We believe that our model is robust and can be of great help for our client both in case they want to advertise their accommodations with separate rooms or whole apartments as well. 
+
+*One disclaimer:* Our choice of the date was quite arbitrary and possibly not the best considering the low volume of tourism in December and the ongoing COVID-19 pandemic. Nevertheless we just want to showcase what we are able to do with the data at our disposal and we are happy to rerun the analysis for the client in a more appropriate time as well.
+
+## Airbnb data 
+
+In order to be able to build our models we did a heavy cleaning on the data downloaded from Inside Airbnb. We were informed that the client owns real estate in the heart of Lisbon only and that they own apartments that can accommodate 2-6 people only, so we narrowed our scope accordingly. We got rid of observations that do not belong to Lisbon or were not apartments (we also included condominimums) or apartment rooms for 2-6 people. Whether a property is a full apartment or a room is going to be very important furthermore in this analysis, because we want to show the client what options they have. They can decide to rent out a full apartments or separate rooms as well. Furthermore, we excluded observations, where the price was more than EUR1000/night, as those were considered to be extreme values that are either erroneous or very much outside of the client's expectation. We aimed to keep as many variables as possible and dropped missing values only in rare cases, so we used imputation when it was necessary. The cleaning steps are documented in our [github repo](https://github.com/zsomborh/airbnb_lisbon/blob/main/code/clean_airbnb.R).
+
+Overall we included variables that could be grouped into the following categories: 
+
+- **Base Variables**: Such were the number of bedrooms, bathrooms, accommodates, the type of property which was either apartment or room and the minimum nights one has to stay in the accommodation.
+- **Host Information**: These variables were of the host of the apartment such as the number of years they were hosts on Airbnb, how many listed apartments they have, whether their identity is verified or if they are superhosts.
+- **Reviews**: This category aims to capture the kind of feedback that the accommodation received from the guests so far - these are the number of reviews, the average rating it received from clients from 1-10 and the amount of rating they receive in a month on average. 
+- **Amenities**: These capture the extras that an accommodation can offer e.g.: whether it has a kitchen, coffee machine, or has locks on the door - from modeling perspective all such tags that were used more than 100 times were converted to dummies (e.g if accommodation has shampoo tag, it will receive a 1, and 0 otherwise). We decided not to keep them all as some tags appeared very infrequently and such low variation in a predictor would just throw off the model as opposed to improving it. 
+
+## EDA
+
+Our target variable is price, a right skewed variable with a long right tail. On average in our sample, the cost of the apartments was almost twice as much as rooms, which is perfectly understandable given that the freedom of a whole apartment is something for which people are willing to pay. In total, we have a bit more than 11k observations, in which, the number of apartments is almost four times more than the number of rooms. 
+
+```{r table 1, echo = FALSE , results = "asis", warning = FALSE, message = FALSE }
+
+price_sum <- df %>% group_by(property_type) %>% summarise(
+    mean     = mean(price),
+    median   = median(price),
+    std      = sd(price),
+    iq_range = IQR(price), 
+    min      = min(price),
+    max      = max(price),
+    skew     = skewness(price),
+    numObs   = sum( !is.na( price ) ) )
+
+knitr::kable(price_sum, caption= 'Descriptive statistics of price for rooms and apartmants', digits = c(0,rep(2,ncol(price_sum)-2),0)) 
+```
+
+```{r fig 1, fig.width=10,fig.height=4, fig.cap='Distribution of apartment and room prices 20th Dec, 2020', echo = FALSE , results = "asis", warning = FALSE, message = FALSE }
+p1 <- ggplot( data = df[df$property_type == 'apartment',] , aes( x = price ) ) +
+    geom_histogram( aes(y = ..density..) , alpha = 1, binwidth = 30, color = 'black', fill = 'navyblue') +
+    geom_density( aes(y = ..density..) , alpha = .5 , bw = 50, color = 'black', fill='steelblue') +
+    labs(x='Price distribution of apartments',y='Density') + theme_minimal() 
+
+p2 <- ggplot( data = df[df$property_type == 'room',] , aes( x = price ) ) +
+    geom_histogram( aes(y = ..density..) , alpha = 1, binwidth = 30, color = 'black', fill = 'purple4') +
+    geom_density( aes(y = ..density..) , alpha = .5 , bw = 50, color = 'black', fill='darkorchid2') +
+    labs(x='Price distribution of rooms',y='Density') + theme_minimal() 
+
+ggarrange(p1, p2, nrow = 1 )
+```
+
+We also created boxplots to further highlight the differences in price for certain categories. The number of minimum nights for example had no bearing whatsoever on the price - there is a very slight downward tendency - so if someone rented their apartment out for longer periods only, the asking price on average was slightly lower. We saw a quasi linear trend in prices in case there were more accommodates, for both rooms and apartments, which is of course within the expectations. However one interesting finding looking at these plots was that there is no visible difference between price for veteran, or newer hosts, and neither was there any for higher and lower rated accommodations. It would be foolish to draw conclusions from these boxplots only, but our intuition was that better rated accommodations would be priced higher, as it seemed rational that people would be happy to pay premium to stay at a place with a good reputation. 
+
+```{r fig 2, fig.width=10,fig.height=8, fig.cap='Boxplot of price by  minimum nights, number of accomodates, hosting history and review scores', echo = FALSE , results = "asis", warning = FALSE, message = FALSE }
+
+plotdf <- df %>% mutate(
+    host_cat = ifelse(host_since <=3, '0-3 yrs', ifelse(host_since <= 7, '4-7 yrs','7+yrs')),
+    score_cat = ifelse(review_scores_rating <= 80, '0-80', 
+                       ifelse(review_scores_rating <= 85, '81-85', 
+                              ifelse( review_scores_rating <= 90, '86-90',
+                                      ifelse(review_scores_rating <= 95, '91-95', '96-100')))),
+    min_cat = ifelse(minimum_nights ==1, '1 night',
+                     ifelse(minimum_nights == 2, '2 nights', 
+                        ifelse(minimum_nights == 3, '3 nights', '4+ nights')))) %>% 
+    select(bedrooms,property_type, accommodates, host_cat,score_cat, price, min_cat)
+
+p1 <- ggplot(plotdf, aes(x = factor(min_cat), y = price,
+                        fill = factor(property_type), color=factor(property_type))) +
+    geom_boxplot(alpha=0.8, na.rm=T, outlier.shape = NA, width = 0.8) +
+    scale_color_manual( name = '', values = c('black', 'black')) +
+    scale_fill_manual( name = '', values = c('navyblue', 'purple4')) +
+    stat_boxplot(geom = "errorbar", width = 0.8, size = 0.3, na.rm=T)+
+    labs(x = "Minimum nights",y = "Price (EUR)")+
+    theme_minimal() +
+    theme(legend.position = c(0.15,0.9))+
+    scale_y_continuous(expand = c(0.01,0.01), limits=c(0, 210), breaks = seq(0,210, 50))
+
+p2 <- ggplot(plotdf, aes(x = factor(accommodates), y = price,
+                        fill = factor(property_type), color=factor(property_type))) +
+    geom_boxplot(alpha=0.8, na.rm=T, outlier.shape = NA, width = 0.8) +
+    scale_color_manual( name = '', values = c('black', 'black')) +
+    scale_fill_manual( name = '', values = c('navyblue', 'purple4')) +
+    stat_boxplot(geom = "errorbar", width = 0.8, size = 0.3, na.rm=T)+
+    labs(x = "Accomodates (Persons)",y = "Price (EUR)")+
+    theme_minimal() +
+    theme(legend.position = c(0.15,0.9))+
+    scale_y_continuous(expand = c(0.01,0.01), limits=c(0, 210), breaks = seq(0,210, 50))
+
+p3 <- ggplot(plotdf, aes(x = factor(host_cat), y = price,
+                        fill = factor(property_type), color=factor(property_type))) +
+    geom_boxplot(alpha=0.8, na.rm=T, outlier.shape = NA, width = 0.8) +
+    scale_color_manual( name = '', values = c('black', 'black')) +
+    scale_fill_manual( name = '', values = c('navyblue', 'purple4')) +
+    stat_boxplot(geom = "errorbar", width = 0.8, size = 0.3, na.rm=T)+
+    labs(x = "How long host is present in Airbnb",y = "Price (EUR)")+
+    theme_minimal() +
+    theme(legend.position = c(0.15,0.95))+
+    scale_y_continuous(expand = c(0.01,0.01), limits=c(0, 200), breaks = seq(0,200, 50))
+
+p4 <- ggplot(plotdf, aes(x = factor(score_cat), y = price,
+                        fill = factor(property_type), color=factor(property_type))) +
+    geom_boxplot(alpha=0.8, na.rm=T, outlier.shape = NA, width = 0.8) +
+    scale_color_manual( name = '', values = c('black', 'black')) +
+    scale_fill_manual( name = '', values = c('navyblue', 'purple4')) +
+    stat_boxplot(geom = "errorbar", width = 0.8, size = 0.3, na.rm=T)+
+    labs(x = "Review scores",y = "Price (EUR)")+
+    theme_minimal() +
+    theme(legend.position = c(0.15,0.95))+
+    scale_y_continuous(expand = c(0.01,0.01), limits=c(0, 200), breaks = seq(0,200, 50))
+
+
+ggarrange(p1,p2,p3,p4, nrow = 2, ncol = 2)
+```
+
+## Feature Engineering
+
+We had 94 predictors out of which 80 were made from the amenities. When it came to amenities, functional form was not really a question as they were dummy variables. From the remainder, we mostly had discrete numeric variables with a smaller range (e.g. bedrooms were between 1 to 7) most of which were quite skewed. We have decided and learnt by experimenting that log transformation would not really help in most of the cases due to the limited number of possible $x$ values, but we did transform the number of minimum nights and the listings count that the host had for some of our models.
+
+We were also trying to search for meaningful interactions from the sea of variables that we had. For this we handpicked a few amenities that we thought could make a difference in someone's choice (we have used Airbnb's services before and tried to use our own experience in deciding) and also tried to pick out those that were used relatively frequently and check their interaction with the `property_type` variable. For visual demonstration we created 12 plots out of which we identified 5 potentially useful interactions (with dishwasher, kitchen, lockbox, balcony and self-check in dummies). 
+
+```{r fig 3, fig.width=10,fig.height=8, fig.cap='Bar plots of average prices for handpicked amenities interacting with property types', echo = FALSE , results = "asis", warning = FALSE, message = FALSE }
+p1 <- price_diff_by_variables2(df, "property_type", "coffee_maker", "Property type", 'Coffee Maker')
+p2 <- price_diff_by_variables2(df, "property_type", "wifi", "Property type", 'Wifi')
+p3 <- price_diff_by_variables2(df, "property_type", "dishwasher", "Property type", 'Dishwasher') # looks good
+p4 <- price_diff_by_variables2(df, "property_type", "elevator", "Property type", 'Elevator')
+p5 <- price_diff_by_variables2(df, "property_type", "lock_on_bedroom_door", "Property type", 'Lock on bedroom')
+p6 <- price_diff_by_variables2(df, "property_type", "microwave", "Property type", 'Microwave')
+p7 <- price_diff_by_variables2(df, "property_type", "kitchen", "Property type", 'Kitchen') # looks good
+p8 <- price_diff_by_variables2(df, "property_type", "lockbox", "Property type", 'LockBox') # looks good 
+p9<- price_diff_by_variables2(df, "property_type", 'luggage_dropoff_allowed', "Property type",'Luggage dropoff')
+p10<- price_diff_by_variables2(df, "property_type", 'patio_or_balcony', "Property type", 'Balcony avaialable') # looks good
+p11<- price_diff_by_variables2(df, "property_type", 'refrigerator', "Property type", 'Fridge')
+p12<- price_diff_by_variables2(df, "property_type", 'self_checkin', "Property type", 'Self Check-in') # looks good 
+
+interaction_plot <- plot_grid(p1, p2, p3, p4, p5, p6, p7 ,p8, p9, p10, p11,p12, nrow=3, ncol=4)
+interaction_plot
+```
+
+## Modeling
+
+We wanted to run less complicated models first and see how they faired compared to more complex ones. Our machine learning approach started off with creating a random 25% holdout subset, and train our models on the rest. We used 5-fold cross validation as a control and a convex symmetric loss function: RMSE. The RMSE which served an important role in our final model choice was the average of the 5 RMSEs calculated after each fold. We also calculated the RMSE after predicting on the holdout set and while the differences in performance were not huge, more complex models did better.
+
+#### OLS and Lasso
+
+We ran our first naive model which contained the basic variables only (1st OLS) - this would serve as our benchmark. As we included more variables we noticed a substantial improvement (2nd OLS), but interactions and log transformations (3rd OLS) had a mild impact on the RMSEs only. 
+
+We had high hopes for the Lasso models as we thought we have a bunch of variables from the amenities that were probably not very significant, and the $\lambda$ penalty term would drop most of them out and reduce the noise. What happened was contrary to this belief - we tuned our Lasso models to look for multiple $\lambda$s between .01 and 1 with a step of .01 - as very few of the estimated variable coefficients were reduced to zero. This way Lasso also lost it's biggest advantage and couldn't really outperform the OLS models. We tried using all variables with log transformations with a few interactions (1st Lasso) and the same with much more interactions - all interactions between property type and amenities (2nd Lasso). The below tables summarize the OLS and Lasso RMSEs both in the cross validated case and also as estimated on the holdout. 
+``` {r modeling prep, include = FALSE}
+# variable groupping 
+target_var = 'price'
+
+basic_vars <- c('property_type', 'accommodates', 'bedrooms', 'beds', 'minimum_nights', 'bathrooms')
+
+host_info <- c('host_since', 'host_is_superhost', 'host_listings_count', 'host_identity_verified')
+
+reviews <- c('number_of_reviews', 'review_scores_rating','reviews_per_month', 'flag_review_scores_rating')
+
+amenities <- colnames(df)[!colnames(df) %in% c('id',target_var, basic_vars, host_info,host_info,reviews)]
+
+cont_vars <- c('minimum_nights', 'bedrooms','beds','bathrooms', 'host_since', 'host_listings_count', 'review_scores_rating', 'reviews_per_month', 'number_of_reviews')
+
+# Get interactions 
+
+df <- get_lns(df,cont_vars,5)
+ln_vars <- colnames(df)[!colnames(df) %in% c(basic_vars,host_info,reviews,amenities,'id', 'price')]
+interactions1 <- c('property_type * dishwasher',
+                   'property_type * kitchen',
+                   'property_type * lockbox',
+                   'property_type * patio_or_balcony',
+                   'property_type * self_checkin'
+)
+
+interactions2 <- c(paste0('property_type * (',paste(amenities, collapse = '+'),')'))
+
+df <- df %>% mutate(
+    ln_price = log(price),
+    ln_minimum_nights =       ifelse(is.infinite(ln_minimum_nights),0,ln_minimum_nights),
+    ln_host_listings_count =  ifelse(is.infinite(ln_host_listings_count),0,ln_host_listings_count),
+    ln_price =                ifelse(is.infinite(ln_price),0,ln_price)
+)
+#create predictors sets
+
+predictors_1 <- c(basic_vars)
+predictors_2 <- c(basic_vars, host_info, reviews, amenities)
+transformed <- substring(ln_vars,4)
+
+predictors_transformed_small <- c(predictors_2[!predictors_2 %in% transformed],interactions1,ln_vars)
+predictors_transformed_big <- c(predictors_2[!predictors_2 %in% transformed],interactions2,ln_vars)
+
+#  create holdout set 
+set.seed(7)
+train_indices <- as.integer(createDataPartition(df$price, p = 0.75, list = FALSE))
+df_train <- df[train_indices, ]
+df_holdout <- df[-train_indices, ]
+# train control is 5 fold cross validation
+train_control <- trainControl(method = "cv",
+                              number = 5,
+                              verboseIter = FALSE)
+
+```
+
+```{r ols modeling, include = FALSE}
+
+ols_model1 <- readRDS( paste0(w_dir,'/models/ols_model.rds'))
+ols_model2 <- readRDS( paste0(w_dir,'/models/ols_model2.rds'))
+ols_model3 <- readRDS( paste0(w_dir,'/models/ols_model3.rds'))
+lasso_model <- readRDS( paste0(w_dir,'/models/lasso_model.rds'))
+lasso_model2 <- readRDS( paste0(w_dir,'/models/lasso_model2.rds'))
+
+
+
+temp_models <-
+    list("OLS - base" = ols_model1,
+         "OLS - comp" = ols_model2,
+         "OLS - comp w/ few interactions" = ols_model3,
+         "LASSO1 - w/ few interactions" = lasso_model,
+         "LASSO2 - w/ all interactions" = lasso_model2)
+
+result_temp <- resamples(temp_models) %>% summary()
+
+
+result_rmse <- imap(temp_models, ~{
+    mean(result_temp$values[[paste0(.y,"~RMSE")]])
+}) %>% unlist() %>% as.data.frame() %>%
+    rename("CV RMSE" = ".")
+
+result_holdout <- map(temp_models, ~{
+    RMSE(predict(.x, newdata = df_holdout), df_holdout[["price"]])
+}) %>% unlist() %>% as.data.frame() %>%
+    rename("Holdout RMSE" = ".")
+
+a <- names(temp_models)
+b <- result_rmse$`CV RMSE`
+c <- result_holdout$`Holdout RMSE`
+tf <- data.frame(a,b,c)
+colnames(tf) <- c('Model', 'CV RMSE', 'Holdout RMSE')
+
+
+
+```
+
+```{r table 2, echo = FALSE , results = "asis", warning = FALSE, message = FALSE }
+
+knitr::kable(tf, caption= 'Model comparison for OLS and Lasso models in CV and Holdout RMSE ', digits = c(3,3)) 
+```
+
+#### Random Forest and Gradient Boosting Machines
+
+We set the tuning parameters and stopping rules for each model. In case of CART, we used a stopping rule that limits the level to be nine. At the random forest, the algorithm picked the best model among 9 different models. On one hand, we defined the number of variables to consider for each split when growing the decorrelated trees: 8, 10 and 12 variables were set. On the other hand, we defined the stopping rule in terms of the minimum number of observations required for the terminal nodes: 5, 10 and 15 observations. Thus, we had 3*3 different random forest models and we picked the best one for the further analysis. For GBM, we applied the next parameters: complexity of trees; number of trees; learning rate; and the minimum number of training set samples in a node to commence.
+
+```{r, random forest model, include=FALSE}
+rf_model <- readRDS( paste0(w_dir,'/models/random_forest.rds'))
+gbm_model <- readRDS( paste0(w_dir,'/models/gbm.rds'))
+cart_model <- readRDS( paste0(w_dir,'/models/cart.rds'))
+
+```
+## Model selection
+
+After running the models, we compared them based on their performance to pick the best one for the price prediction. We ran our models on the test set (coming from cross-validation slicing) and also, we ran them on the holdout set for the model comparison. We chose our model based on the lowest RMSE, which was the random forest model, where RMSE was 49.742 in the test set and 49.910 in the holdout set. Both of them were considered as the lowest RMSE.
+
+```{r, final models, include=FALSE}
+temp_models <-
+  list("OLS3" = ols_model3,
+       "LASSO (model w/ all interactions)" = lasso_model2,
+       "CART" = cart_model,
+       "Random forest" = rf_model,
+       "GBM" = gbm_model)
+
+result_temp <- resamples(temp_models) %>% summary()
+
+result_rmse <- imap(temp_models, ~{
+    mean(result_temp$values[[paste0(.y,"~RMSE")]])
+}) %>% unlist() %>% as.data.frame() %>%
+    rename("CV RMSE" = ".")
+
+result_holdout <- map(temp_models, ~{
+    RMSE(predict(.x, newdata = df_holdout), df_holdout[["price"]])
+}) %>% unlist() %>% as.data.frame() %>%
+    rename("Holdout RMSE" = ".")
+
+a <- names(temp_models)
+b <- result_rmse$`CV RMSE`
+c <- result_holdout$`Holdout RMSE`
+tf <- data.frame(a,b,c)
+colnames(tf) <- c('Model', 'CV RMSE', 'Holdout RMSE')
+```
+
+```{r table 3, echo = FALSE , results = "asis", warning = FALSE, message = FALSE }
+
+knitr::kable(tf, caption= 'Comparing all models in CV and Holdout RMSE ', digits = c(3,3)) 
+```
+
+
+## Model diagnostics
+
+### Variable importance plot
+
+The TOP10 most important variables are shown in the plot below. The most important variable (~6.6%) in the random forest model for pricing is the number of reviews per month, and the forth most important is the number of reviews. The number of accommodates is the second most important variable in pricing. As a benchmark, we can use the "Predicting Airbnb Prices in London with Random Forest" case study (Békés, G., & Kézdi, G. (2021). Data Analysis for Business, Economics, and Policy), where the number of accommodation was the most important variable. 
+
+```{r, fig 4, fig.width=6,fig.height=5, fig.align='center', fig.cap='The TOP10 most important variable in the random forest model', echo = FALSE , results = "asis", warning = FALSE, message = FALSE}
+# variable importance data frame
+rf_model_var_imp <- importance(rf_model$finalModel)/1000
+rf_model_var_imp_df <-
+  data.frame(varname = names(rf_model_var_imp),imp = rf_model_var_imp) %>%
+  arrange(desc(imp)) %>%
+  mutate(imp_percentage = imp/sum(imp))
+rf_model_var_imp_df <- rf_model_var_imp_df[-c(1), ]
+
+# variable importance plot - top 10 only
+rf_model_var_imp_plot_b <- ggplot(rf_model_var_imp_df[1:10,], aes(x=reorder(varname, imp), y=imp_percentage)) +
+  geom_point(colour="navyblue", size=1) +
+  geom_segment(aes(x=varname,xend=varname,y=0,yend=imp_percentage), colour="navyblue", size=0.75) +
+  ylab("Importance (Percent)") +
+  xlab("Variable Name") +
+  coord_flip() +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  theme_bw() +
+  theme(axis.text.x = element_text(size=8), axis.text.y = element_text(size=8),
+        axis.title.x = element_text(size=8), axis.title.y = element_text(size=8))
+rf_model_var_imp_plot_b
+```
+
+### Grouped variable importance
+
+As mentioned above, we created four groups for the variables (basic variables, host information, reviews and amenities). The graph below shows the importance of each group in the random forest model. Grouped amenities win by a large margin they make up for 49% of the total importance. Group of basic variables, containing variables such as number of bedrooms, bathrooms, accommodates and the type of property, is the second most important group of variable. 
+
+```{r, fig 5, fig.width=6,fig.height=5, fig.align='center', fig.cap='Importance of groups of variables', echo = FALSE , results = "asis", warning = FALSE, message = FALSE}
+rf_model_var_imp <- importance(rf_model$finalModel)/1000
+rf_model_var_imp_df <-
+  data.frame(varname = names(rf_model_var_imp),imp = rf_model_var_imp) %>%
+  arrange(desc(imp)) %>%
+  mutate(imp_percentage = imp/sum(imp))
+
+#rf_model_var_imp_df[rf_model_var_imp_df$varname %in% amenities,]
+
+# grouped variable importance 2
+# basic variables, host variables, review variables and amenities are grouped --> TO THE R MARKDOWN
+
+rf_model_var_imp_df <- rf_model_var_imp_df %>% mutate(
+  group2 = ifelse(varname %in% amenities, 'amenities',
+                 ifelse(varname %in% basic_vars, 'basic_vars',
+                        ifelse(varname %in% reviews, 'reviews', 'host_info'))))
+
+rf_model_var_imp_grouped2 <- rf_model_var_imp_df %>%  group_by(group2) %>% summarise(group_imp_sum = sum(imp_percentage)) %>%  arrange(desc(group_imp_sum))
+
+rf_model_var_imp_grouped2_plot <-
+  ggplot(rf_model_var_imp_grouped2, aes(x=reorder(group2, group_imp_sum), y=group_imp_sum)) +
+  geom_point(color="navyblue", size=1) +
+  geom_segment(aes(x=group2,xend=group2,y=0,yend=group_imp_sum), color="navyblue", size=0.7) +
+  ylab("Importance (Percent)") +   xlab("Variable Name") +
+  coord_flip() +
+  # expand=c(0,0),
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  theme_bw() +
+  theme(axis.text.x = element_text(size=8), axis.text.y = element_text(size=8),
+        axis.title.x = element_text(size=8), axis.title.y = element_text(size=8))
+rf_model_var_imp_grouped2_plot
+```
+
+If we unfold the groups, the difference between the importance of amenities and the rest of the variables are even larger. Group of amenities is a diverse set of extras, and it seems that they are quintessential for our prediction.
+
+```{r, fig 6, fig.width=6,fig.height=5, fig.align='center', fig.cap='Importance of the group of amenities and each variable separately', echo = FALSE , results = "asis", warning = FALSE, message = FALSE}
+# grouped variable importance 3
+# amenities are grouped --> TO THE R MARKDOWN
+
+rf_model_var_imp_df <- rf_model_var_imp_df %>% mutate(
+  group3 = ifelse(varname %in% amenities, 'amenities', varname))
+                  
+rf_model_var_imp_grouped3 <- rf_model_var_imp_df %>%  group_by(group3) %>% summarise(group_imp_sum = sum(imp_percentage)) %>%  arrange(desc(group_imp_sum))
+
+rf_model_var_imp_grouped3_plot <-
+  ggplot(rf_model_var_imp_grouped3, aes(x=reorder(group3, group_imp_sum), y=group_imp_sum)) +
+  geom_point(color="navyblue", size=1) +
+  geom_segment(aes(x=group3,xend=group3,y=0,yend=group_imp_sum), color="navyblue", size=0.7) +
+  ylab("Importance (Percent)") +   xlab("Variable Name") +
+  coord_flip() +
+  # expand=c(0,0),
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  theme_bw() +
+  theme(axis.text.x = element_text(size=8), axis.text.y = element_text(size=8),
+        axis.title.x = element_text(size=8), axis.title.y = element_text(size=8))
+rf_model_var_imp_grouped3_plot
+```
+
+### Partial dependence plot
+
+Due to the partial dependence plot, we can predict the price for the number of accommodates, if everything else is unchanged. If we increase the number of accommodates, the price also increases in a fairly linear way. 
+
+```{r, fig 7, fig.width=6,fig.height=5, fig.align='center', fig.cap='Partial dependence plot - Price and number of accommodates', echo = FALSE , results = "asis", warning = FALSE, message = FALSE}
+pdp_n_acc <- pdp::partial(rf_model, pred.var = "accommodates", pred.grid = distinct_(df_holdout, "accommodates"), train = df_train)
+pdp_n_acc_plot <- pdp_n_acc %>%
+  autoplot( ) +
+  geom_point(colour="navyblue", size=2) +
+  geom_line(colour="navyblue", size=1) +
+  ylab("Predicted price") +
+  xlab("Accommodates (persons)") +
+  scale_x_continuous(limit=c(1,7), breaks=seq(1,7,1))+
+  theme_bw()
+pdp_n_acc_plot
+```
+
+We can differentiate the price prediction for the property type by comparing an apartment and a room. On the graph below, we can see that an apartment is predicted to have higher price than a room in average. Our findings in this matter are similar that of the mentioned London case study, where entire home/apartment had the highest predicted price. 
+
+```{r, fig 8, fig.width=6,fig.height=5, fig.align='center', fig.cap='Partial dependence plot - Price and property type', echo = FALSE , results = "asis", warning = FALSE, message = FALSE}
+pdp_n_roomtype <- pdp::partial(rf_model, pred.var = "property_type", pred.grid = distinct_(df_holdout, "property_type"), train = df_train)
+pdp_n_roomtype_plot <- pdp_n_roomtype %>%
+  autoplot( ) +
+  geom_point(color="navyblue", size=2) +
+  ylab("Predicted price") +
+  xlab("Room type") +
+  scale_y_continuous(limits=c(60,120), breaks=seq(60,120, by=10)) +
+  theme_bw()
+pdp_n_roomtype_plot
+```
+
+### Subsample performance
+
+We can compare the the predictive performance of our model in subsamples. First, we created a small apartment and a large apartment subgroup. If the number of accommodates is 3 or fewer, it is a small apartment, otherwise a large apartment. We calculated the RMSE for both subgroups to see whether our prediction is equally precise in the two subgroups. However, RMSE is based on price differences, so it is lower if the price itself is lower too. Thus, we created a metrics, RMSE/price, to compare the model performance correctly in the subgroups. The RMSE/price is slightly lower in case of large apartments, which means, that the price prediction is more precises in this subsample.
+The second subgroup is the property type. There is also a small difference in the model performance. The pricing is more precise in case of rooms, however, apartments are just a bit lower than the RMSE/price for all the observations.
+In the case study about Airbnb price prediction in London, the differences between each subsamples were smaller. The RMSE/price at the large apartment was 0.43, at the small apartment was 0.46. As for the property type, the RMSE/price was 0.46 at the apartment type and 0.56 at the house type of property. 
+
+```{r, table of subsamples, echo = FALSE , results = "asis", warning = FALSE, message = FALSE }
+# Subsample performance: 
+# how well the rf_model performs on different subsets - calculating RMSE and the mean price per each subgroup
+
+# holdout set
+df_holdout_w_prediction <- df_holdout %>%
+  mutate(predicted_price = predict(rf_model, newdata = df_holdout))
+
+
+######### create nice summary table of heterogeneity
+a <- df_holdout_w_prediction %>%
+  mutate(is_low_size = ifelse(accommodates <= 3, "small apt", "large apt")) %>%
+  group_by(is_low_size) %>%
+  dplyr::summarise(
+    rmse = RMSE(predicted_price, price),
+    mean_price = mean(price),
+    rmse_norm = RMSE(predicted_price, price) / mean(price)
+  )
+
+
+
+
+b <- df_holdout_w_prediction %>%
+  filter(property_type %in% c("apartment", "room")) %>%
+  group_by(property_type) %>%
+  dplyr::summarise(
+    rmse = RMSE(predicted_price, price),
+    mean_price = mean(price),
+    rmse_norm = rmse / mean_price
+  )
+
+
+c <- df_holdout_w_prediction %>%
+  dplyr::summarise(
+    rmse = RMSE(predicted_price, price),
+    mean_price = mean(price),
+    rmse_norm = RMSE(predicted_price, price) / mean(price)
+  )
+
+# Save output - RESULT_3 shows error
+colnames(a) <- c(" ", "RMSE", "Mean price", "RMSE/price")
+colnames(b) <- c(" ", "RMSE", "Mean price", "RMSE/price")
+c <- cbind("All",c)
+colnames(c) <- c(" ", "RMSE", "Mean price", "RMSE/price")
+
+line1 <- c("Size of accomodation", "-", "-", "-")
+line2 <- c("Property type", "-", "-", "-")
+line3 <- c("All",  "-", "-", "-")
+
+result_3 <- rbind(line1, a, line2, b, line3, c) %>%
+  transform(RMSE = as.numeric(RMSE), `Mean price` = as.numeric(`Mean price`),
+            `RMSE/price` = as.numeric(`RMSE/price`))
+
+knitr::kable(result_3, caption= 'Performance across subsamles', digits = c(0,rep(2,ncol(price_sum)-2),0))
+```
+
+# Conclusion
+
+In this project, we attempted to predict the price of accommodations in Lisbon using publicly available data from Airbnb. Knowing our client's assets, we focused on Lisbon and excluded outer districts and reduced the scope for accommodations to those open for 2-6 guests. We created five different models and compared them based on their accuracy. The random forest model turned out to be the best with an almost 15% improvement in RMSE when compared to a simple OLS. We believe our model does a relatively good job at the complex task of price prediction and could provide invaluable insight to our client as well. Using such a model could also be instrumental in revenue estimation that can also assist future investment decisions. Even though we can't draw clear conclusions on association between the price and the predictors, we have learnt a great deal from our data and can definitely conclude that the number of reviews, the number of accommodates and the amenities have a crucial role in price prediction. If we were to improve our model further, these were definitely important areas deserving more focus. 
