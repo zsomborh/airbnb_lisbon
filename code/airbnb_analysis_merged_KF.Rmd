@@ -56,13 +56,13 @@ In order to be able to build our models we did a heavy cleaning on the data down
 Overall we included variables that could be grouped into the following categories: 
 
 - **Base Variables**: Such were the number of bedrooms, bathrooms, accommodates, the type of property which was either apartmant or room and the minimum nights one has to stay in the accommodation.
-- **Host Information**: These variables were of the host of the apartmant such as the number of years they were hosts on Airbnb, how many listed apartmants they have, whether their identity is verified or if they are superhosts.
+- **Host Information**: These variables were of the host of the apartment such as the number of years they were hosts on Airbnb, how many listed apartmants they have, whether their identity is verified or if they are superhosts.
 - **Reviews**: This category aims to capture the kind of feedback the accommodation received from the guests so far - these are the number of reviews, the average rating it received from clients from 1-10 and the amount of rating they receive in a month on average. 
 - **Amenities**: These capture the extras that an accomodation can offer e.g.: whether it has a kitchen, coffee machine, or has locks on the door - from modeling perspective all such tags that were used more than 100 times were converted to dummies (e.g if accommodation has shampoo tag, it will receive a 1, and 0 otherwise). We decided not to keep them all as some tags appeared very infrequently and such low variation in a predictor would just throw off the model as opposed to improving it. 
 
 ## EDA
 
-Our target variable is price, a right skewed variable with a long right tail. On average in our sample apartment costed almost twice as much as rooms, which is perfectly understandable given that the freedom of a whole apartment is something that people are willing to pay more. In total we have a bit more than 11k observations in which the number of apartments is almost four times more than the number of rooms. 
+Our target variable is price, a right skewed variable with a long right tail. On average in our sample the cost of apartments was almost twice as much as rooms, which is perfectly understandable given that the freedom of a whole apartment is something for which people are willing to pay. In total we have a bit more than 11k observations in which the number of apartments is almost four times more than the number of rooms. 
 
 ```{r table 1, echo = FALSE , results = "asis", warning = FALSE, message = FALSE }
 
@@ -158,9 +158,9 @@ ggarrange(p1,p2,p3,p4, nrow = 2, ncol = 2)
 
 ## Feature Engineering
 
-We had 94 predictors out of which 80 were made from the amenities. When it came to amenities, functional for was not really a question as they were dummy variables. From the remainder, we mostly had discrete numeric variables with a smaller range (e.g. bedrooms were between 1 to 7) most of which were quite skewed. We decided that log transformation would not really help in most of the cases due to the limited number of possible $x$ values, but we did transform the number of minimum nights and the listings count that the host had.
+We had 94 predictors out of which 80 were made from the amenities. When it came to amenities, functional form was not really a question as they were dummy variables. From the remainder, we mostly had discrete numeric variables with a smaller range (e.g. bedrooms were between 1 to 7) most of which were quite skewed. We decided and learnt bz experimenting that log transformation would not really help in most of the cases due to the limited number of possible $x$ values, but we did transform the number of minimum nights and the listings count that the host had for some of our models.
 
-We were also trying to search for possible useful interactions from the sea of variables that we had. For this we handpicked a few amenities that we thought could make a difference in someone's choosing (we have used Airbnb services before and tried to use our own experience in deciding) and also tried to pick out those that were used relatively frequently and check their interaction with the `property_type`. For visual demonstration we created 12 plots out of which we identified 5 potentially useful interactions. 
+We were also trying to search for meaningful interactions from the sea of variables that we had. For this we handpicked a few amenities that we thought could make a difference in someone's choosing (we have used Airbnb's services before and tried to use our own experience in deciding) and also tried to pick out those that were used relatively frequently and check their interaction with the `property_type` variable. For visual demonstration we created 12 plots out of which we identified 5 potentially useful interactions (with dishwasher, kitchen, lockbox, balcony and self-check in dummies). 
 
 ```{r fig 3, fig.width=10,fig.height=8, fig.cap='Bar plots of average prices for handpicked amenities interacting with property types', echo = FALSE , results = "asis", warning = FALSE, message = FALSE }
 p1 <- price_diff_by_variables2(df, "property_type", "coffee_maker", "Property type", 'Coffee Maker')
@@ -186,9 +186,9 @@ We wanted to run less complicated models first and see how they faired compared 
 
 #### OLS and Lasso
 
-We ran our first naive model which contained the basic variables only - this would serve as our benchmark. As we included more variables we noticed a substantial improvement, but interactions and log transformations had a mild impact on the RMSEs only. 
+We ran our first naive model which contained the basic variables only (1st OLS) - this would serve as our benchmark. As we included more variables we noticed a substantial improvement (2nd OLS), but interactions and log transformations (3rd OLS) had a mild impact on the RMSEs only. 
 
-We had high hopes for the Lasso models as we thought we have a bunch of variables from the amenities that were probably not very significant, and the $\lambda$ penalty term would drop most of them out and reduce the noise. What happened was contrary to this belief - we tuned our Lasso models to look for multiple $\lambda$s between .01 and 1 with a step of .01 - as very few of the estimated variable coefficients were reduced to zero. This way Lasso also lost it's biggest advantage and couldn't really outperform the OLS models. The below tables summarise the OLS and Lasso RMSEs both in the cross validated case and also as estimated on the holdout. 
+We had high hopes for the Lasso models as we thought we have a bunch of variables from the amenities that were probably not very significant, and the $\lambda$ penalty term would drop most of them out and reduce the noise. What happened was contrary to this belief - we tuned our Lasso models to look for multiple $\lambda$s between .01 and 1 with a step of .01 - as very few of the estimated variable coefficients were reduced to zero. This way Lasso also lost it's biggest advantage and couldn't really outperform the OLS models. We tried using all variables with log transformations with a few interactions (1st Lasso) and the same with much more interactions - all interactions between property type and amenities (2nd Lasso). The below tables summarise the OLS and Lasso RMSEs both in the cross validated case and also as estimated on the holdout. 
 ``` {r modeling prep, include = FALSE}
 # variable groupping 
 target_var = 'price'
@@ -300,7 +300,7 @@ cart_model <- readRDS( paste0(w_dir,'/models/cart.rds'))
 ```
 ## Model selection
 
-After running the models, we compared them based on their performance to pick the best one for the price prediction. We ran our models on the test set (coming from cross-validation slicing) and also, we ran them on the holdout set for the model comparison. The Root Mean Squared Error (RMSE) serves to measure the prediction error, so we picked the model having the least RMSE value. In our case, it was the random forest model, where RMSE was 49.742 in the test set and 49.910 in the holdout set. Both of them was considered as the lowest RMSE.
+After running the models, we compared them based on their performance to pick the best one for the price prediction. We ran our models on the test set (coming from cross-validation slicing) and also, we ran them on the holdout set for the model comparison. We chose our model based on the lowest RMSE which in our case was the random forest model, where RMSE was 49.742 in the test set and 49.910 in the holdout set. Both of them were considered as the lowest RMSE.
 
 ```{r, final models, include=FALSE}
 temp_models <-
@@ -334,13 +334,12 @@ colnames(tf) <- c('Model', 'CV RMSE', 'Holdout RMSE')
 knitr::kable(tf, caption= 'Comparing all models in CV and Holdout RMSE ', digits = c(3,3)) 
 ```
 
-# Analytics
 
 ## Model diagnostics
 
 ### Variable importance plot
 
-The TOP10 most important variables are shown on the plot below. The most important variable (~6.6%) in the random forest model for pricing is number of reviews per month, and the forth most important is the number of reviews. The number of accommodates is on the second most important variable in pricing. As a benchmark, we can use the "Predicting Airbnb Prices in London with Random Forest" case study (Békés, G., & Kézdi, G. (2021). Data Analysis for Business, Economics, and Policy), where the number of accommodation was the most important variable. 
+The TOP10 most important variables are shown in the plot below. The most important variable (~6.6%) in the random forest model for pricing is the number of reviews per month, and the forth most important is the number of reviews. The number of accommodates is the second most important variable in pricing. As a benchmark, we can use the "Predicting Airbnb Prices in London with Random Forest" case study (Békés, G., & Kézdi, G. (2021). Data Analysis for Business, Economics, and Policy), where the number of accommodation was the most important variable. 
 
 ```{r, fig 4, fig.width=6,fig.height=5, fig.align='center', fig.cap='The TOP10 most important variable in the random forest model', echo = FALSE , results = "asis", warning = FALSE, message = FALSE}
 # variable importance data frame
@@ -367,7 +366,7 @@ rf_model_var_imp_plot_b
 
 ### Grouped variable importance
 
-As mentioned above, we created four groups for the variables (basic variables, host information, reviews and amenities). The graph below shows the importance of each group in the random forest model. The amenities together has 49% of importance in the random forest model. Group of basic variables, containing variables such as number of bedrooms, bathrooms, accommodates and the type of property, is the second most impoartant variable. 
+As mentioned above, we created four groups for the variables (basic variables, host information, reviews and amenities). The graph below shows the importance of each group in the random forest model. Grouped amenities win by a large margine they make up for 49% of the total importance. Group of basic variables, containing variables such as number of bedrooms, bathrooms, accommodates and the type of property, is the second most impoartant variable. 
 
 ```{r, fig 5, fig.width=6,fig.height=5, fig.align='center', fig.cap='Importance of groups of variables', echo = FALSE , results = "asis", warning = FALSE, message = FALSE}
 rf_model_var_imp <- importance(rf_model$finalModel)/1000
@@ -402,7 +401,7 @@ rf_model_var_imp_grouped2_plot <-
 rf_model_var_imp_grouped2_plot
 ```
 
-If we unfold the groups, the difference between the importance of amenities and the rest of the variables are even larger. Group of amenities is a diverse set of extras, such as iron, dishwasher or TV with Netflix. It seems that these extras are quite important in the pricing model.
+If we unfold the groups, the difference between the importance of amenities and the rest of the variables are even larger. Group of amenities is a diverse set of extras, and it seems that they are extras are quitessential for ourprediction.
 
 ```{r, fig 6, fig.width=6,fig.height=5, fig.align='center', fig.cap='Importance of the group of amenities and each variable separately', echo = FALSE , results = "asis", warning = FALSE, message = FALSE}
 # grouped variable importance 3
@@ -444,7 +443,7 @@ pdp_n_acc_plot <- pdp_n_acc %>%
 pdp_n_acc_plot
 ```
 
-We can differentiate the price prediction for the property type by comparing an apartment and a room. On the graph below, we can see that an apartment is predicted to have higher price than a room in average. It was similar in the London case study mention above, where entire home/apartment type of room has the highest predicted price. 
+We can differentiate the price prediction for the property type by comparing an apartment and a room. On the graph below, we can see that an apartment is predicted to have higher price than a room in average. Our findings in this matter are similar that of the mentioned London case study, where entire home/apartment had the highest predicted price. 
 
 ```{r, fig 8, fig.width=6,fig.height=5, fig.align='center', fig.cap='Partial dependence plot - Price and property type', echo = FALSE , results = "asis", warning = FALSE, message = FALSE}
 pdp_n_roomtype <- pdp::partial(rf_model, pred.var = "property_type", pred.grid = distinct_(df_holdout, "property_type"), train = df_train)
@@ -460,7 +459,7 @@ pdp_n_roomtype_plot
 
 ### Subsample performance
 
-We can compare the the predictive performance of our model in subsamples. First, we created a small apartment and a large apartment subgroup. If the number of accommodates is 3 or fewer, it is a small apartment, otherwise a large apartment. We calculated the RMSE for both subgroups to see wether our prediction is equally precise in the two subgroups. However, RMSE is based on price differences, so it is lower if the price itself is lower too. Thus, we created a metrics, RMSE/price, to compare the model performance correctly in the subgroups. The RMSE/price is slightly lower in case of large apartments, which means, that the price prediction is more precises in this subsample.
+We can compare the the predictive performance of our model in subsamples. First, we created a small apartment and a large apartment subgroup. If the number of accommodates is 3 or fewer, it is a small apartment, otherwise a large apartment. We calculated the RMSE for both subgroups to see whether our prediction is equally precise in the two subgroups. However, RMSE is based on price differences, so it is lower if the price itself is lower too. Thus, we created a metrics, RMSE/price, to compare the model performance correctly in the subgroups. The RMSE/price is slightly lower in case of large apartments, which means, that the price prediction is more precises in this subsample.
 The second subgroup is the property type. There is also a small difference in the model performance. The pricing is more precise in case of rooms, however, apartments are just a bit lower than the RMSE/price for all the observations.
 In the case study about Airbnb price prdiction in London, the differences between each subsamples were smaller. The RMSE/price at the large apartment was 0.43, at the small apartment was 0.46. As for the property type, the RMSE/price was 0.46 at the apartment type and 0.56 at the house type of property. 
 
@@ -504,14 +503,14 @@ c <- df_holdout_w_prediction %>%
   )
 
 # Save output - RESULT_3 shows error
-colnames(a) <- c("", "RMSE", "Mean price", "RMSE/price")
-colnames(b) <- c("", "RMSE", "Mean price", "RMSE/price")
+colnames(a) <- c(" ", "RMSE", "Mean price", "RMSE/price")
+colnames(b) <- c(" ", "RMSE", "Mean price", "RMSE/price")
 c <- cbind("All",c)
-colnames(c) <- c("", "RMSE", "Mean price", "RMSE/price")
+colnames(c) <- c(" ", "RMSE", "Mean price", "RMSE/price")
 
-line1 <- c("Size of accomodation", "", "", "")
-line2 <- c("Property type", "", "", "")
-line3 <- c("All",  "", "", "")
+line1 <- c("Size of accomodation", " ", " ", " ")
+line2 <- c("Property type", " ", " ", " ")
+line3 <- c("All",  " ", " ", " ")
 
 result_3 <- rbind(line1, a, line2, b, line3, c) %>%
   transform(RMSE = as.numeric(RMSE), `Mean price` = as.numeric(`Mean price`),
@@ -522,4 +521,4 @@ knitr::kable(result_3, caption= 'Performance across subsamles', digits = c(0,rep
 
 # Conclusion
 
-In this project, we attempted to predict the price of an Airbnb in Lisbon using publicly available data. As our client required, we focused on Lisbon and excluded outer districts and the scope of the prediction was accommodations for 2-6 guests. We created five different models and compared them based on their accuracy. The random forest model turned to be the best model, as it has the lowest RMSE value. Based on our results, we recommend to use the random forest model for the price prediction, as it is proven to be more precise compared to the originally used OLS model. Thus, the revenue estimation could be more accurate for the future investment decisions. Even though the association between the price and the predictors are not clear, we can state the number of reviews, the number of accommodates and the amenities have an important role in the price prediction.
+In this project, we attempted to predict the price of accommodations in Lisbon using publicly available data from Airbnb. Knowing our client's assets, we focused on Lisbon and excluded outer districts and the reduced the scope for accommodations to those open for 2-6 guests. We created five different models and compared them based on their accuracy. The random forest model turned out to be the best with an almost 15% improvement in RMSE when compared to a simple OLS. We believe our model does a relatively good job at the complex task of price prediction and could could provide invaluable insight to our client as well. Using such a model could also be instrumental in revenue estimation that can also assist future investment decisions. Even though we can't draw clear conclusions on association between the price and the predictors, we learnt a great deal from our data and can definitely conclude that the number of reviews, the number of accommodates and the amenities have a crucial role in price prediction. If we were to improve our model further, these were definitely important areas deserving more focus. 
