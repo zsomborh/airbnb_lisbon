@@ -1,0 +1,1 @@
+The data is collected from [Inside Airbnb](http://insideairbnb.com/) - our scope was Lisbon on the 20th of Dec. Our goal is to predict accomodation prices.
